@@ -2,6 +2,10 @@ import os
 import pandas as pd
 import numpy as np
 
+# Base directory where the raw and clean data are stored
+base_dir = '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/'
+
+
 def find_header_row(filepath, header_name):
     """Find the header row index that contains a specific header name in an Excel file, handle merged cells."""
     temp_data = pd.read_excel(filepath, header=None)
@@ -39,6 +43,12 @@ def process_O_CtasAPagar(data):
     # Remove the first row below the headers
     if not data.empty:
         data = data.iloc[1:]  # Remove the first row, which could be totals or sub-headers
+    return data
+
+def process_O_Estoq(data):
+    """Process O_Estoq files: adapt this function to meet specific requirements."""
+    # Example: Remove rows where 'Código do Produto' is empty
+    data = data[data['Código do Produto'].notna()]
     return data
 
 def process_B_Estoq(data):
@@ -110,8 +120,9 @@ def convert_currency_to_float(currency_str):
 
     
 def check_and_process_files():
-    raw_dir = 'data/raw'
-    clean_dir = 'data/clean'
+    raw_dir = os.path.join(base_dir, 'raw')
+    clean_dir = os.path.join(base_dir, 'clean')
+
     processing_map = {
         'O_NFSI': (process_O_NFSI, "Operação"),  # Use process_O_NFSI for O_NFSI files
         'O_NFCI': (process_O_NFCI, "Operação"),  # Use process_O_NFCI for O_NFCI files
@@ -119,7 +130,8 @@ def check_and_process_files():
         'O_CtasAPagar': (process_O_CtasAPagar, "Minha Empresa (Nome Fantasia)"),  # Add new report processing
         'O_CtasARec': (process_O_CtasAPagar, "Minha Empresa (Nome Fantasia)"),  # Same structure as O_CtasAPagar
         'B_Estoq': (process_B_Estoq, "Código"),  # New entry for B_Estoq
-        'L_LPI': (process_L_LPI, "Data")  # Add new entry for L_LPI
+        'L_LPI': (process_L_LPI, "Data"),  # Add new entry for L_LPI
+        'O_Estoq': (process_O_Estoq, "Código do Produto")  # New entry for O_Estoq
     }
 
     for subdir, dirs, files in os.walk(raw_dir):
