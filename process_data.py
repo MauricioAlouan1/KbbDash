@@ -2,8 +2,22 @@ import os
 import pandas as pd
 import numpy as np
 
-# Base directory where the raw and clean data are stored
-base_dir = '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/'
+# Define the potential base directories
+path_options = [
+    '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/',
+    '/Users/simon/Library/CloudStorage/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data'
+]
+# Iterate over the list and set base_dir to the first existing path
+for path in path_options:
+    if os.path.exists(path):
+        base_dir = path
+        break
+else:
+    # If no valid path is found, raise an error or handle it appropriately
+    print("None of the specified directories exist.")
+    base_dir = None  # Or set a default path if appropriate
+
+print("Base directory set to:", base_dir)
 
 
 def find_header_row(filepath, header_name):
