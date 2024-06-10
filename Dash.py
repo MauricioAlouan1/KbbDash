@@ -1,7 +1,7 @@
 import dash
 from dash import dcc, html, Input, Output
 import plotly.express as px
-from data_processing import load_recent_data, load_static_data
+from KbbDash.remake_dataset import load_recent_data, load_static_data
 
 # Load data
 base_dir = '/path/to/your/monthly/data'
