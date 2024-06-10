@@ -1,4 +1,5 @@
 import os
+import openpyxl
 import pandas as pd
 import numpy as np
 
@@ -82,13 +83,16 @@ def process_L_LPI(data):
                         'Desconto Pedido Seller', 'Desconto Item Seller', 'Comissão',
                         'Frete Seller', 'Frete Comprador', 'Acrescimo', 'Recebimento', 'Custo',
                         'Custo Total', 'Imposto', 'Lucro Bruto']  # Update if more columns are involved
-
     for col in currency_columns:
         if col in data.columns:
             data[col] = data[col].apply(convert_currency_to_float)
-
     return data
 
+def process_MLK_Vendas(data):
+    """Process MLK_Vendas files."""
+    # Example processing: remove rows where 'N.º de venda' is NaN
+    data = data[data['N.º de venda'].notna()]
+    return data
 
 
 def excel_column_range(start, end):
@@ -105,16 +109,19 @@ def excel_column_range(start, end):
         columns.append(col)
     return columns
 
-def load_and_clean_data(filepath, processor, header_name):
-    """Load data from an Excel file, manually handle merged headers."""
-    header_row_index = find_header_row(filepath, header_name)
-    print(f"Using header row index: {header_row_index}")
-    data = pd.read_excel(filepath, header=None)
-    headers = data.iloc[header_row_index].tolist()  # Assuming the headers are in the specified row
-    data.columns = headers
-    data = data.iloc[header_row_index + 1:]  # Skip the header row and anything above it
-    print("Loaded column headers:", data.columns)  # Print actual column names
+
+def load_and_clean_data(filepath, processor, header_name, extract_hyperlinks=False):
+    """Load data from an Excel file, handle merged headers, optionally extract hyperlinks."""
+    if extract_hyperlinks:
+        # Call a separate function dedicated to extracting hyperlinks
+        data = extract_hyperlinks_data(filepath, header_name)
+    else:
+        # Continue with the original data loading method
+        header_row_index = find_header_row(filepath, header_name)
+        data = pd.read_excel(filepath, header=header_row_index)    
+    # Process the data using the specified processor function
     return processor(data)
+
 
 def convert_currency_to_float(currency_str):
     """Convert currency string 'R$ 149,90' to float 149.90, handle mixed data types."""
@@ -138,21 +145,22 @@ def check_and_process_files():
     clean_dir = os.path.join(base_dir, 'clean')
 
     processing_map = {
-        'O_NFSI': (process_O_NFSI, "Operação"),  # Use process_O_NFSI for O_NFSI files
-        'O_NFCI': (process_O_NFCI, "Operação"),  # Use process_O_NFCI for O_NFCI files
-        'O_CC': (process_O_CC, "Situação"),  # Assuming 'Situação' is the header of interest
-        'O_CtasAPagar': (process_O_CtasAPagar, "Minha Empresa (Nome Fantasia)"),  # Add new report processing
-        'O_CtasARec': (process_O_CtasAPagar, "Minha Empresa (Nome Fantasia)"),  # Same structure as O_CtasAPagar
-        'B_Estoq': (process_B_Estoq, "Código"),  # New entry for B_Estoq
-        'L_LPI': (process_L_LPI, "Data"),  # Add new entry for L_LPI
-        'O_Estoq': (process_O_Estoq, "Código do Produto")  # New entry for O_Estoq
+        'O_NFSI': (process_O_NFSI, "Operação", False),
+        'O_NFCI': (process_O_NFCI, "Operação", False),
+        'O_CC': (process_O_CC, "Situação", False),
+        'O_CtasAPagar': (process_O_CtasAPagar, "Minha Empresa (Nome Fantasia)", False),
+        'O_CtasARec': (process_O_CtasAPagar, "Minha Empresa (Nome Fantasia)", False),
+        'B_Estoq': (process_B_Estoq, "Código", False),
+        'L_LPI': (process_L_LPI, "Data", False),
+        'O_Estoq': (process_O_Estoq, "Código do Produto", False),
+        'MLK_Vendas': (process_MLK_Vendas, "N.º de venda", True),  # Enable hyperlink extraction for MLK_Vendas
+        'MLA_Vendas': (process_MLK_Vendas, "N.º de venda", True)  # New entry, same process as MLK_Vendas
     }
-
     for subdir, dirs, files in os.walk(raw_dir):
         for file in files:
             if file.endswith('.xlsx') and not file.startswith('~$'):
                 # Loop through each file type in the processing map
-                for key, (processor, header_name) in processing_map.items():
+                for key, (processor, header_name, use_hyperlinks) in processing_map.items():
                     if key in file:  # Check if the file type matches the key in the map
                         raw_filepath = os.path.join(subdir, file)
                         clean_subdir = os.path.join(clean_dir, os.path.basename(subdir))
@@ -161,13 +169,51 @@ def check_and_process_files():
                         if not os.path.exists(clean_filepath):
                             print(f"Processing {file}...")
                             try:
-                                data = load_and_clean_data(raw_filepath, processor, header_name)
+                                data = load_and_clean_data(raw_filepath, processor, header_name, use_hyperlinks)
                                 save_cleaned_data(data, clean_filepath)
                             except Exception as e:
                                 print(f"Error processing {file}: {e}")
                         else:
                             print(f"Skipped {file}, already processed.")
 
+
+def extract_hyperlinks_data(filepath, header_name):
+    """Extract data and concatenate text with hyperlinks, ensuring updates are saved."""
+    wb = openpyxl.load_workbook(filepath, data_only=False)
+    ws = wb.active
+    data_rows = []
+    header_row_index = None
+    headers = []
+
+    # Iterate over rows to find the header and extract data
+    for row in ws.iter_rows(min_row=1, max_col=ws.max_column, values_only=False):
+        if header_row_index is None:
+            if any(header_name == (cell.value or '') for cell in row):
+                header_row_index = row[0].row
+                headers = [cell.value for cell in row]
+                continue
+        if header_row_index and row[0].row > header_row_index:
+            row_data = []
+            for cell in row:
+                if cell.hyperlink:
+                    # Replace specific parts of the hyperlink
+                    hyperlink_replaced = cell.hyperlink.target.replace("https://www.mercadolivre.com.br/vendas/", "##")
+                    hyperlink_replaced = hyperlink_replaced.replace("/detalhe#source=excel", "##")
+                    cell_value = f"{cell.value}|>{hyperlink_replaced}"  # Concatenate value and modified hyperlink
+                else:
+                    cell_value = cell.value
+                row_data.append(cell_value)
+            data_rows.append(row_data)
+
+    return pd.DataFrame(data_rows, columns=headers)
+
+
+def find_header_row(filepath, header_name):
+    """Utility function to find the header row index using pandas."""
+    for i, row in pd.read_excel(filepath, header=None).iterrows():
+        if header_name in row.values:
+            return i
+    raise ValueError(f"Header {header_name} not found in the file.")
 
 
 def save_cleaned_data(data, output_filepath):

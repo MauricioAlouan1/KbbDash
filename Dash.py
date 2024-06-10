@@ -1,39 +1,39 @@
 import dash
-from dash import html, dcc, Input, Output
+from dash import dcc, html
+from dash.dependencies import Input, Output
 import pandas as pd
-import plotly.express as px  # For easier creation of plots
+import plotly.express as px
+import numpy as np  # Make sure to import numpy
 
-# Sample DataFrame
+# Sample Data
 df = pd.DataFrame({
-    'A': ['foo', 'bar', 'foo', 'bar', 'foo', 'bar', 'foo', 'foo'],
-    'B': ['one', 'one', 'two', 'three', 'two', 'two', 'one', 'three'],
-    'C': range(8),
-    'D': [i * 2 for i in range(8)]  # Using list comprehension to multiply each element
+    "Date": pd.date_range(start='1/1/2020', periods=100),
+    "Value": (np.random.rand(100) * 100).round(2)
 })
 
+# Create a Dash application
 app = dash.Dash(__name__)
 
+# Define the layout of the application
 app.layout = html.Div([
-    dcc.Graph(id='graph-with-slider'),
-    dcc.Slider(
-        id='year-slider',
-        min=df['C'].min(),
-        max=df['C'].max(),
-        value=df['C'].min(),
-        marks={str(year): str(year) for year in df['C'].unique()},
-        step=None
+    dcc.Graph(id='line-chart'),
+    dcc.Dropdown(
+        id='dropdown',
+        options=[{'label': x, 'value': x} for x in df['Date'].dt.year.unique()],
+        value=df['Date'].dt.year.unique()[0]
     )
 ])
 
+# Callback to update graph based on dropdown
 @app.callback(
-    Output('graph-with-slider', 'figure'),
-    Input('year-slider', 'value'))
-def update_figure(selected_year):
-    filtered_df = df[df.C == selected_year]
-    fig = px.scatter(filtered_df, x='A', y='D', color='B', size='D',
-                     hover_data=['B'], size_max=55)
-    fig.update_layout(transition_duration=500)
+    Output('line-chart', 'figure'),
+    [Input('dropdown', 'value')]
+)
+def update_chart(selected_year):
+    filtered_df = df[df['Date'].dt.year == selected_year]
+    fig = px.line(filtered_df, x='Date', y='Value', title=f'Yearly Data for {selected_year}')
     return fig
 
+# Run the application
 if __name__ == '__main__':
     app.run_server(debug=True)
