@@ -1,3 +1,4 @@
+import re
 import os
 import openpyxl
 import pandas as pd
@@ -112,15 +113,30 @@ def excel_column_range(start, end):
 
 def load_and_clean_data(filepath, processor, header_name, extract_hyperlinks=False):
     """Load data from an Excel file, handle merged headers, optionally extract hyperlinks."""
-    if extract_hyperlinks:
+    if extract_hyperlinks:  
         # Call a separate function dedicated to extracting hyperlinks
         data = extract_hyperlinks_data(filepath, header_name)
     else:
         # Continue with the original data loading method
         header_row_index = find_header_row(filepath, header_name)
         data = pd.read_excel(filepath, header=header_row_index)    
+    # Extract month and year from the filename and add as a new column if necessary
+    if processor in [process_B_Estoq, process_O_CtasAPagar, process_O_Estoq]:
+        month_year = int(extract_month_year_from_filename(filepath))
+        data['AnoMes'] = month_year
     # Process the data using the specified processor function
     return processor(data)
+
+def extract_month_year_from_filename(filename):
+    """Extract month and year from the filename in the format YYMM."""
+    base_name = os.path.basename(filename)
+    match = re.search(r'(\d{4})_(\d{2})', base_name)
+    if match:
+        year = match.group(1)[-2:]  # Get the last two digits of the year
+        month = match.group(2)  # Get the month
+        return f"{year}{month}"
+    else:
+        return "Unknown"
 
 
 def convert_currency_to_float(currency_str):
