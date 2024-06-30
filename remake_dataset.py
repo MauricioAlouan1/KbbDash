@@ -1,6 +1,25 @@
 import pandas as pd
 import os
 from datetime import datetime, timedelta
+from openpyxl import load_workbook
+
+# Define the potential base directories
+path_options = [
+    '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/',
+    '/Users/simon/Library/CloudStorage/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data'
+]
+# Iterate over the list and set base_dir to the first existing path
+for path in path_options:
+    if os.path.exists(path):
+        base_dir = path
+        break
+else:
+    # If no valid path is found, raise an error or handle it appropriately
+    print("None of the specified directories exist.")
+    base_dir = None  # Or set a default path if appropriate
+print("Base directory set to:", base_dir)
+static_dir = os.path.join(base_dir, 'Tables')
+inventory_file_path = os.path.join(static_dir, 'R_EstoqComp.xlsx')  # Update to the correct path if needed
 
 column_rename_dict = {
     'O_NFCI': {
@@ -63,27 +82,24 @@ def standardize_text_case(df):
             df[col] = df[col].str.upper()
     return df
 
-
 def merge_all_data(all_data):
     # Ensure all relevant columns are in uppercase for case-insensitive comparison
     all_data = {key: standardize_text_case(df) for key, df in all_data.items()}
 
-    print(f"Columns in O_NFCI: {all_data['O_NFCI'].columns}")
-    print(f"Columns in T_Remessas: {all_data['T_Remessas'].columns}")
-    print(f"Columns in T_Prodf: {all_data['T_Prodf'].columns}")
-    print(f"Columns in T_GruposCli: {all_data['T_GruposCli'].columns}")
+    # compute column ANOMES
+    compute_NFCI_ANOMES(all_data)
 
-    # Merge O_NFCI with T_Remessas on column 'NomeF'
+    # Merge O_NFCI with T_Remessas - REM
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_Remessas", "NomeF", "Rem", default_value=0)
 
-    # Merge O_NFCI with T_Prodf on column 'CodPF'
-    all_data = merge_data(all_data, "O_NFCI", "CodPF", "T_Prodf", "CodPF", "CodPP")
+    # Merge O_NFCI with T_Prodf - CODPP
+    all_data = merge_data(all_data, "O_NFCI", "CodPF", "T_ProdF", "CodPF", "CodPP", default_value="xxx")
 
-    # Merge O_NFCI with T_GruposCli on column 'NomeF'
+    # Merge O_NFCI with T_GruposCli - G1
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_GruposCli", "NomeF", "G1", default_value="V")
 
-    # Merge inventory data with existing dataset (Example)
-    all_data = merge_data(all_data, "O_NFCI", "CodPF", "INVENTORY_DATA", "CodPF", "Estoque")
+    # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
+    all_data = merge_data2v(all_data, "O_NFCI", "Emiss", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", default_value=0)
 
     return all_data
 
@@ -92,8 +108,8 @@ def preprocess_inventory_data(file_path):
     processed_sheets = {}
 
     for sheet_name, df in sheets.items():
-        df = df.melt(id_vars=['CodPF'], var_name='Date', value_name='Value')
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.strftime('%y%m')
+        df = df.melt(id_vars=['CodPF'], var_name='ANOMES', value_name='Value')
+        df['ANOMES'] = pd.to_datetime(df['ANOMES'], errors='coerce').dt.strftime('%y%m')
         processed_sheets[sheet_name] = df
     
     return processed_sheets
@@ -124,10 +140,55 @@ def merge_data(all_data, df1_name, df1_col, df2_name, df2_col, new_col=None, ind
         if indicator_name and default_value is not None:
             merged_df[indicator_name] = merged_df[indicator_name].apply(lambda x: default_value if x == 'left_only' else merged_df[new_col])
             merged_df.drop(columns=[new_col, indicator_name], inplace=True)
+        elif new_col and default_value is not None:
+            merged_df[new_col] = merged_df[new_col].fillna(default_value)
 
         all_data[df1_name] = merged_df
     return all_data
 
+def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2_col2, new_col=None, default_value=None):
+    df1_col1 = df1_col1.upper()
+    df1_col2 = df1_col2.upper()
+    df2_col1 = df2_col1.upper()
+    df2_col2 = df2_col2.upper()
+    if new_col:
+        new_col = new_col.upper()
+
+    if df1_name in all_data and df2_name in all_data:
+        df1 = all_data[df1_name]
+        df2 = all_data[df2_name]
+
+        # Standardize column names
+        df1.columns = [col.upper() for col in df1.columns]
+        df2.columns = [col.upper() for col in df2.columns]
+
+        print(f"Columns in {df1_name} before merge: {df1.columns}")
+        print(f"Columns in {df2_name} before merge: {df2.columns}")
+
+        if df1_col1 not in df1.columns or df2_col1 not in df2.columns or df1_col2 not in df1.columns or df2_col2 not in df2.columns:
+            raise KeyError(f"Column '{df1_col1}' or '{df2_col1}' or '{df1_col2}' or '{df2_col2}' not found in dataframes.")
+
+        # Merge based on both columns
+        merged_df = df1.merge(df2[[df2_col1, df2_col2, new_col]].drop_duplicates(), 
+                              left_on=[df1_col1, df1_col2], right_on=[df2_col1, df2_col2], 
+                              how='left')
+
+        if new_col and default_value is not None:
+            merged_df[new_col].fillna(default_value, inplace=True)
+
+        all_data[df1_name] = merged_df
+    return all_data
+
+
+def compute_NFCI_ANOMES(all_data):
+    for key, df in all_data.items():
+        # Add the ANOMES column to O_NFCI
+        if key == 'O_NFCI' and 'EMISS' in df.columns:
+            df['EMISS'] = pd.to_datetime(df['EMISS'], errors='coerce')  # Ensure the date is parsed correctly
+            df['ANOMES'] = df['EMISS'].dt.strftime('%y%m')  # Format date as YYMM
+            print(f"Added ANOMES column to {key}")
+        all_data[key] = df
+    return all_data
 
 def add_computed_columns(all_data):
     for key, df in all_data.items():
@@ -145,9 +206,9 @@ def print_all_tables_and_columns(all_data):
         print("-" * 50)
 
 def main():
-    base_dir = '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/'
-    static_dir = os.path.join(base_dir, 'Tables')
-    inventory_file_path = os.path.join(static_dir, 'R_EstoqComp.xlsx')  # Update to the correct path if needed
+    #base_dir = '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/'
+    #static_dir = os.path.join(base_dir, 'Tables')
+    #inventory_file_path = os.path.join(static_dir, 'R_EstoqComp.xlsx')  # Update to the correct path if needed
 
     # Define file patterns for each data type
     file_patterns = {
@@ -172,7 +233,7 @@ def main():
 
     # Load static data
     static_tables = ['T_CondPagto.xlsx', 'T_Fretes.xlsx', 'T_GruposCli.xlsx', 'T_MP.xlsx', 
-                     'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx','T_Vol.xlsx', 'T_Prodf.xlsx', 'T_ProdP.xlsx', 'T_Entradas.xlsx']
+                     'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx','T_Vol.xlsx', 'T_ProdF.xlsx', 'T_ProdP.xlsx', 'T_Entradas.xlsx']
     static_data_dict = {table.replace('.xlsx', ''): load_static_data(static_dir, table) for table in static_tables}
     
     # Check static data shapes
@@ -181,35 +242,40 @@ def main():
     
     inventory_data = preprocess_inventory_data(inventory_file_path)
 
-    print_all_tables_and_columns(all_data)
-    print(f"-----xxxxxxxxxxxxxxxxx--------------")
-
+    #print(f"-----xxxxxxxxxxxxxxxxx 200--------------")
+    #print_all_tables_and_columns(all_data)
+ 
     # Add static data to all_data dictionary
-    #all_data.update(static_data_dict) #removed 
-    all_data = {
-        'O_NFCI': recent_data,
-        **static_data_dict,
-        **inventory_data
-    }
-    print_all_tables_and_columns(all_data)
+    all_data.update(static_data_dict) 
+    all_data.update(inventory_data)
+    
+    #print(f"-----xxxxxxxxxxxxxxxxx 207--------------")
+    #print_all_tables_and_columns(all_data)
 
     all_data = rename_columns(all_data, column_rename_dict)
 
+    print(f"-----xxxxxxxxxxxxxxxxx 212--------------")
+    print_all_tables_and_columns(all_data)
+
     # Merge all data with static data
     all_data = merge_all_data(all_data) 
-    #print(f"Merged data shapes:")
-    #for key, df in all_data.items():
-    #    print(f"{key}: {df.shape}")  # Debug print
-
     # Add computed columns
     all_data = add_computed_columns(all_data)  # Add computed columns
 
     # Save all data to one Excel file with multiple sheets
     output_path = os.path.join(base_dir, 'clean', 'merged_data.xlsx')
-    with pd.ExcelWriter(output_path) as writer:
+    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         for key, df in all_data.items():
             df.to_excel(writer, sheet_name=key, index=False)
             print(f"Added {key} data to {output_path} in sheet {key}")  # Debug print
+
+    # Load the workbook and add auto-filter to all sheets
+    print(f"Adding AUTO-FILTERS")
+    workbook = load_workbook(output_path)
+    for sheet in workbook.sheetnames:
+        worksheet = workbook[sheet]
+        worksheet.auto_filter.ref = worksheet.dimensions
+    workbook.save(output_path)
 
     print(f"All merged data saved to {output_path}")
 
