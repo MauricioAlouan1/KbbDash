@@ -90,16 +90,20 @@ def merge_all_data(all_data):
     compute_NFCI_ANOMES(all_data)
 
     # Merge O_NFCI with T_Remessas - REM
+    print(f"Making column REM in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_Remessas", "NomeF", "Rem", default_value=0)
 
     # Merge O_NFCI with T_Prodf - CODPP
+    print(f"Making column CODPP in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "CodPF", "T_ProdF", "CodPF", "CodPP", default_value="xxx")
 
     # Merge O_NFCI with T_GruposCli - G1
+    print(f"Making column G1 in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_GruposCli", "NomeF", "G1", default_value="V")
 
     # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
-    all_data = merge_data2v(all_data, "O_NFCI", "Emiss", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", default_value=0)
+    print(f"Making column ECU in O_NFCI")
+    all_data = merge_data2v(all_data, "O_NFCI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=0)
 
     return all_data
 
@@ -146,13 +150,13 @@ def merge_data(all_data, df1_name, df1_col, df2_name, df2_col, new_col=None, ind
         all_data[df1_name] = merged_df
     return all_data
 
-def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2_col2, new_col=None, default_value=None):
+def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2_col2, value_col, new_col_name, default_value=None):
     df1_col1 = df1_col1.upper()
     df1_col2 = df1_col2.upper()
     df2_col1 = df2_col1.upper()
     df2_col2 = df2_col2.upper()
-    if new_col:
-        new_col = new_col.upper()
+    value_col = value_col.upper()
+    new_col_name = new_col_name.upper()
 
     if df1_name in all_data and df2_name in all_data:
         df1 = all_data[df1_name]
@@ -165,17 +169,19 @@ def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2
         print(f"Columns in {df1_name} before merge: {df1.columns}")
         print(f"Columns in {df2_name} before merge: {df2.columns}")
 
-        if df1_col1 not in df1.columns or df2_col1 not in df2.columns or df1_col2 not in df1.columns or df2_col2 not in df2.columns:
-            raise KeyError(f"Column '{df1_col1}' or '{df2_col1}' or '{df1_col2}' or '{df2_col2}' not found in dataframes.")
+        if df1_col1 not in df1.columns or df1_col2 not in df1.columns or df2_col1 not in df2.columns or df2_col2 not in df2.columns:
+            raise KeyError(f"One of the columns '{df1_col1}', '{df1_col2}', '{df2_col1}', '{df2_col2}' not found in dataframes.")
 
-        # Merge based on both columns
-        merged_df = df1.merge(df2[[df2_col1, df2_col2, new_col]].drop_duplicates(), 
-                              left_on=[df1_col1, df1_col2], right_on=[df2_col1, df2_col2], 
-                              how='left')
+        df2_cols = [df2_col1, df2_col2, value_col]
+        merged_df = df1.merge(df2[df2_cols].drop_duplicates(), left_on=[df1_col1, df1_col2], right_on=[df2_col1, df2_col2], how='left')
 
-        if new_col and default_value is not None:
-            merged_df[new_col].fillna(default_value, inplace=True)
+        if value_col and default_value is not None:
+            merged_df[value_col] = merged_df[value_col].fillna(default_value)
 
+        # Rename the value column to the new column name
+        merged_df.rename(columns={value_col: new_col_name}, inplace=True)
+
+        print(f"Columns after merge: {merged_df.columns}")
         all_data[df1_name] = merged_df
     return all_data
 
@@ -264,20 +270,20 @@ def main():
 
     # Save all data to one Excel file with multiple sheets
     output_path = os.path.join(base_dir, 'clean', 'merged_data.xlsx')
-    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+    with pd.ExcelWriter(output_path) as writer:
         for key, df in all_data.items():
             df.to_excel(writer, sheet_name=key, index=False)
             print(f"Added {key} data to {output_path} in sheet {key}")  # Debug print
 
-    # Load the workbook and add auto-filter to all sheets
-    print(f"Adding AUTO-FILTERS")
+    print(f"All merged data saved to {output_path}")
+
+    # Load the saved workbook to apply auto-filters
     workbook = load_workbook(output_path)
-    for sheet in workbook.sheetnames:
-        worksheet = workbook[sheet]
+    for sheetname in workbook.sheetnames:
+        worksheet = workbook[sheetname]
         worksheet.auto_filter.ref = worksheet.dimensions
     workbook.save(output_path)
-
-    print(f"All merged data saved to {output_path}")
+    print("Added auto-filters to all sheets")
 
 if __name__ == "__main__":
     main()
