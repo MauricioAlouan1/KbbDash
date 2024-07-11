@@ -2,6 +2,7 @@ import pandas as pd
 import os
 from datetime import datetime, timedelta
 from openpyxl import load_workbook
+from openpyxl.styles import NamedStyle, Font, PatternFill, Alignment
 
 # Define the potential base directories
 path_options = [
@@ -23,22 +24,52 @@ inventory_file_path = os.path.join(static_dir, 'R_EstoqComp.xlsx')  # Update to 
 
 column_rename_dict = {
     'O_NFCI': {
-        'Operação': 'Op',
+        'Operação': 'OP',
         'Nota Fiscal': 'NF',
-        'Data de Emissão (completa)': 'Emiss',
-        'Cliente (Razão Social)': 'NomeRS',
-        'Cliente (Nome Fantasia)': 'NomeF',
-        'Código do Produto': 'CodPF', 
-        'Quantidade': 'Qtd', 
+        'Data de Emissão (completa)': 'EMISS',
+        'Cliente (Razão Social)': 'NOMERS',
+        'Cliente (Nome Fantasia)': 'NOMEF',
+        'Código do Produto': 'CODPF', 
+        'Quantidade': 'QTD', 
+        'Total de Mercadoria': 'MERCVLR',
         'Valor do ICMS ST': 'ICMSST',
         'Valor do IPI': 'IPI',
-        'Total da Nota Fiscal': 'TotalNF'
+        'Total da Nota Fiscal': 'TOTALNF',
+        'Valor do ICMS': 'ICMS',
+        'Estado': 'UF'
  
         # Add other columns that need renaming for O_NFCI
     },
     'B_Estoq': {
-        'Código': 'CodPF'
+        'Código': 'CODPF'
         # Add other columns that need renaming for B_Estoq
+    },
+    # Add dictionaries for other dataframes...
+}
+
+column_format_dict = {
+    'O_NFCI': {
+        'EMISS': 'DD-MMM-YY',
+        'QTD': '0',
+        'MERCVLR': '#,##0.00',
+        'ICMSST': '#,##0.00',
+        'IPI': '#,##0.00',
+        'TOTALNF': '#,##0.00',
+        'ICMS': '#,##0.00',
+        'ECU': '#,##0.00',
+        'COMISSPCT': '0.00%',
+        'FRETEPCT': '0.00%',
+        'VERBAPCT': '0.00%',
+        'ECT': '#,##0.00',
+        'COMISSVLR': '#,##0.00',
+        'FRETEVLR': '#,##0.00',
+        'MARGVLR': '#,##0.00',
+        'MARGPCT': '0.00%',
+        # Add other formats for O_NFCI
+    },
+    'B_Estoq': {
+        'CODPF': '@',
+        # Add other formats for B_Estoq
     },
     # Add dictionaries for other dataframes...
 }
@@ -56,7 +87,7 @@ def rename_columns(all_data, column_rename_dict):
             all_data[df_name] = df
     return all_data
 
-def load_recent_data(base_dir, file_pattern, months=3):
+def load_recent_data(base_dir, file_pattern, months=1):
     end_date = datetime.now()
     start_date = end_date - timedelta(days=months * 30)  # Approximately three months
     frames = []
@@ -90,12 +121,12 @@ def merge_all_data(all_data):
     compute_NFCI_ANOMES(all_data)
 
     # Merge O_NFCI with T_Remessas - REM
-    print(f"Making column REM in O_NFCI")
-    all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_Remessas", "NomeF", "Rem", default_value=0)
+    print(f"Making column REM_NF in O_NFCI")
+    all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_Remessas", "NomeF", "REM_NF", default_value=0)
 
     # Merge O_NFCI with T_Prodf - CODPP
     print(f"Making column CODPP in O_NFCI")
-    all_data = merge_data(all_data, "O_NFCI", "CodPF", "T_ProdF", "CodPF", "CodPP", default_value="xxx")
+    all_data = merge_data(all_data, "O_NFCI", "CodPF", "T_ProdF", "CodPF", "CODPP", default_value="xxx")
 
     # Merge O_NFCI with T_GruposCli - G1
     print(f"Making column G1 in O_NFCI")
@@ -104,6 +135,52 @@ def merge_all_data(all_data):
     # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
     print(f"Making column ECU in O_NFCI")
     all_data = merge_data2v(all_data, "O_NFCI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=0)
+ 
+    # Merge VENDEDOR with T_REPS for COMPCT
+    print(f"Making column COMPCT in O_NFCI")
+    all_data = merge_data(all_data, "O_NFCI", "Vendedor", "T_Reps", "Vendedor", "COMISSPCT", default_value=0)
+#   df.rename(columns={'COMISS': 'COMPCT'}, inplace=True)
+#   all_data = merge_data(all_data, "O_NFCI", "VENDEDOR", "T_REPS", "VENDEDOR", "COMPCT", default_value="error")
+
+    # Merge UF with T_Fretes for FretePCT
+    print(f"Making column FretePCT in O_NFCI")
+    all_data = merge_data(all_data, "O_NFCI", "UF", "T_Fretes", "UF", "FRETEPCT", default_value=0)
+
+    # Merge NomeF with T_Fretes for VerbaPct
+    print(f"Making column VerbaPct in O_NFCI")
+    all_data = merge_data(all_data, "O_NFCI", "NOMEF", "T_Verbas", "NomeF", "VERBAPCT", default_value=0)
+    print(f"Finished making VerbaPCT")
+
+    
+    for key, df in all_data.items():
+        if key == 'O_NFCI':
+            print_table_and_columns(all_data, "O_NFCI")
+            # Create column "C"
+            df['C'] = 1 - df['REM_NF']
+            
+            # Create column "B"
+            df['B'] = df.apply(lambda row: 1 if row['OP'] == 'REMESSA DE PRODUTO' and row['C'] == 1 else 0, axis=1)
+            
+            # Create column ECT (ECU x QTD)
+            df['ECT'] = df['ECU'] * df['QTD']
+ 
+            # Create column COMVLR (VLRMERC x COMPCT)
+            df['COMISSVLR'] = df['MERCVLR'] * df['COMISSPCT']
+
+            # Create column FreteVLR (FretePCT x TotalNF)
+            df['FRETEVLR'] = df['FRETEPCT'] * df['TOTALNF']
+
+            # Create column VerbaVLR (VerbaPCT x TotalNF)
+            df['VERBAVLR'] = df['VERBAPCT'] * df['TOTALNF']
+
+            # Create column MargCVlr
+            df['MARGVLR'] = df['MERCVLR'] * (1 - 0.0925) - df['ICMS'] - df['VERBAVLR'] - df['FRETEVLR'] - df['COMISSVLR'] - df['ECT']
+
+            # Create column VerbaVLR (VerbaPCT x TotalNF)
+            df['MARGPCT'] = df['MARGVLR'] / df['MERCVLR']
+
+        # Update the dataframe in all_data
+        all_data[key] = df
 
     return all_data
 
@@ -196,12 +273,6 @@ def compute_NFCI_ANOMES(all_data):
         all_data[key] = df
     return all_data
 
-def add_computed_columns(all_data):
-    for key, df in all_data.items():
-        if 'Quantity' in df.columns and 'Price' in df.columns:
-            df['TotalValue'] = df['Quantity'] * df['Price']
-    return all_data
-
 def load_inventory_data(file_path):
     return pd.read_excel(file_path)
 
@@ -210,6 +281,58 @@ def print_all_tables_and_columns(all_data):
         print(f"Table: {table_name}")
         print("Columns:", df.columns.tolist())
         print("-" * 50)
+
+def print_table_and_columns(all_data, table_name):
+    if table_name in all_data:
+        print(f"Table: {table_name}")
+        print("Columns:", all_data[table_name].columns.tolist())
+        print("-" * 50)
+    else:
+        print(f"Table '{table_name}' not found in the dataset.")
+
+def excel_format(output_path, column_format_dict):
+    print("Formatting all sheets")
+    header_style = NamedStyle(name="header_style")
+    header_style.font = Font(bold=True)
+    header_style.fill = PatternFill("solid", fgColor="6ac5fe")  # Light blue background color
+    header_style.alignment = Alignment(horizontal="center", vertical="center")
+
+    workbook = load_workbook(output_path)
+    for sheet_name in workbook.sheetnames:
+        worksheet = workbook[sheet_name]
+        
+        # Apply header style
+        for col_idx in range(1, worksheet.max_column + 1):
+            cell = worksheet.cell(row=1, column=col_idx)
+            cell.style = header_style
+
+        if sheet_name in column_format_dict:
+            formats = column_format_dict[sheet_name]
+            for col_name, col_format in formats.items():
+                # Find the column index based on header name
+                for col_idx, cell in enumerate(worksheet[1], start=1):
+                    if cell.value == col_name:
+                        break
+                else:
+                    continue  # Skip if column name is not found
+
+                # Apply the format to the entire column
+                for row_idx in range(2, worksheet.max_row + 1):  # Start from the second row to avoid header
+                    cell = worksheet.cell(row=row_idx, column=col_idx)
+                    cell.number_format = col_format
+
+    workbook.save(output_path)
+    print(f"All sheets formatted")
+
+
+def excel_autofilters(output_path):
+    print("Adding auto-filters to all sheets")
+    workbook = load_workbook(output_path)
+    for sheetname in workbook.sheetnames:
+        worksheet = workbook[sheetname]
+        worksheet.auto_filter.ref = worksheet.dimensions
+    workbook.save(output_path)
+    print("Added auto-filters to all sheets")
 
 def main():
     #base_dir = '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/'
@@ -247,43 +370,27 @@ def main():
         print(f"Static data {key} shape: {df.shape}")  # Debug print
     
     inventory_data = preprocess_inventory_data(inventory_file_path)
-
-    #print(f"-----xxxxxxxxxxxxxxxxx 200--------------")
-    #print_all_tables_and_columns(all_data)
  
     # Add static data to all_data dictionary
     all_data.update(static_data_dict) 
     all_data.update(inventory_data)
     
-    #print(f"-----xxxxxxxxxxxxxxxxx 207--------------")
-    #print_all_tables_and_columns(all_data)
-
     all_data = rename_columns(all_data, column_rename_dict)
-
-    print(f"-----xxxxxxxxxxxxxxxxx 212--------------")
-    print_all_tables_and_columns(all_data)
 
     # Merge all data with static data
     all_data = merge_all_data(all_data) 
-    # Add computed columns
-    all_data = add_computed_columns(all_data)  # Add computed columns
 
     # Save all data to one Excel file with multiple sheets
     output_path = os.path.join(base_dir, 'clean', 'merged_data.xlsx')
-    with pd.ExcelWriter(output_path) as writer:
+    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         for key, df in all_data.items():
             df.to_excel(writer, sheet_name=key, index=False)
             print(f"Added {key} data to {output_path} in sheet {key}")  # Debug print
 
     print(f"All merged data saved to {output_path}")
 
-    # Load the saved workbook to apply auto-filters
-    workbook = load_workbook(output_path)
-    for sheetname in workbook.sheetnames:
-        worksheet = workbook[sheetname]
-        worksheet.auto_filter.ref = worksheet.dimensions
-    workbook.save(output_path)
-    print("Added auto-filters to all sheets")
+    excel_format(output_path, column_format_dict)
+    excel_autofilters(output_path)
 
 if __name__ == "__main__":
     main()
