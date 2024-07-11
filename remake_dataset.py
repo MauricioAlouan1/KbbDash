@@ -262,7 +262,6 @@ def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2
         all_data[df1_name] = merged_df
     return all_data
 
-
 def compute_NFCI_ANOMES(all_data):
     for key, df in all_data.items():
         # Add the ANOMES column to O_NFCI

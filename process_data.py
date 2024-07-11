@@ -68,11 +68,12 @@ def process_O_Estoq(data):
     return data
 
 def process_B_Estoq(data):
-    """Process B_Estoq files: convert number formats in 'Quantidade' and remove the last row."""
+    """Process B_Estoq files: convert number formats in 'Quantidade', remove rows with 'Quantidade' = 0, and remove the last row."""
     if not data.empty:
         # Convert 'Quantidade' column to correct numeric format, considering "." as thousands separator and "," as decimal
-        data['Quantidade'] = data['Quantidade'].replace(r'\.', '', regex=True).replace(',', '.', regex=True).astype(float)
-        
+        data['Quantidade'] = data['Quantidade'].replace(r'\.', '', regex=True).replace(',', '.', regex=True).astype(float)        
+        # Remove rows where 'Quantidade' is 0
+        data = data[data['Quantidade'] != 0]        
         # Remove the last row of the DataFrame
         data = data.iloc[:-1]
     return data
