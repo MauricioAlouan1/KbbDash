@@ -37,13 +37,15 @@ column_rename_dict = {
         'Total da Nota Fiscal': 'TOTALNF',
         'Valor do ICMS': 'ICMS',
         'Estado': 'UF'
- 
         # Add other columns that need renaming for O_NFCI
     },
     'B_Estoq': {
         'Código': 'CODPF'
         # Add other columns that need renaming for B_Estoq
     },
+    'L_LPI': {
+        'Preço Com Desconto': 'VLRVENDA'
+    }
     # Add dictionaries for other dataframes...
 }
 
@@ -70,6 +72,9 @@ column_format_dict = {
     'B_Estoq': {
         'CODPF': '@',
         # Add other formats for B_Estoq
+    },
+    'L_LPI':{
+        'VLRVENDA': '#,##0.00',        
     },
     # Add dictionaries for other dataframes...
 }
@@ -121,40 +126,46 @@ def merge_all_data(all_data):
     compute_NFCI_ANOMES(all_data)
 
     # Merge O_NFCI with T_Remessas - REM
-    print(f"Making column REM_NF in O_NFCI")
+    #print(f"Making column REM_NF in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_Remessas", "NomeF", "REM_NF", default_value=0)
 
     # Merge O_NFCI with T_Prodf - CODPP
-    print(f"Making column CODPP in O_NFCI")
+    #print(f"Making column CODPP in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "CodPF", "T_ProdF", "CodPF", "CODPP", default_value="xxx")
 
     # Merge O_NFCI with T_GruposCli - G1
-    print(f"Making column G1 in O_NFCI")
+    #print(f"Making column G1 in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_GruposCli", "NomeF", "G1", default_value="V")
 
     # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
-    print(f"Making column ECU in O_NFCI")
+    #print(f"Making column ECU in O_NFCI")
     all_data = merge_data2v(all_data, "O_NFCI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=0)
  
     # Merge VENDEDOR with T_REPS for COMPCT
-    print(f"Making column COMPCT in O_NFCI")
+    #print(f"Making column COMPCT in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "Vendedor", "T_Reps", "Vendedor", "COMISSPCT", default_value=0)
 #   df.rename(columns={'COMISS': 'COMPCT'}, inplace=True)
 #   all_data = merge_data(all_data, "O_NFCI", "VENDEDOR", "T_REPS", "VENDEDOR", "COMPCT", default_value="error")
 
     # Merge UF with T_Fretes for FretePCT
-    print(f"Making column FretePCT in O_NFCI")
+    #print(f"Making column FretePCT in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "UF", "T_Fretes", "UF", "FRETEPCT", default_value=0)
 
     # Merge NomeF with T_Fretes for VerbaPct
-    print(f"Making column VerbaPct in O_NFCI")
+    #print(f"Making column VerbaPct in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "NOMEF", "T_Verbas", "NomeF", "VERBAPCT", default_value=0)
-    print(f"Finished making VerbaPCT")
+    #print(f"Finished making VerbaPCT")
+
+    # Perform the merge (example merge, adjust as necessary)
+    print(f"Making column Empresa in L_LPI")
+    all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "Empresa", default_value='erro')
+    print(f"Made column Empresa in L_LPI")
 
     
     for key, df in all_data.items():
         if key == 'O_NFCI':
-            print_table_and_columns(all_data, "O_NFCI")
+            # print_table_and_columns(all_data, "O_NFCI")
+
             # Create column "C"
             df['C'] = 1 - df['REM_NF']
             
@@ -179,6 +190,10 @@ def merge_all_data(all_data):
             # Create column VerbaVLR (VerbaPCT x TotalNF)
             df['MARGPCT'] = df['MARGVLR'] / df['MERCVLR']
 
+        elif key == 'L_LPI':
+            # Create a new calculated column (example calculation, adjust as necessary)
+            df['NewCalculatedField'] = df['VLRVENDA'] * (0.9)
+  
         # Update the dataframe in all_data
         all_data[key] = df
 
