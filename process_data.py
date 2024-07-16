@@ -93,9 +93,33 @@ def process_L_LPI(data):
 def process_MLK_Vendas(data):
     """Process MLK_Vendas files."""
     # Example processing: remove rows where 'N.º de venda' is NaN
-    data = data[data['N.º de venda'].notna()]
+    data = process_ml_data(data)
+    #data = data[data['N.º de venda'].notna()]
     return data
 
+def process_ml_data(df):
+    # Ensure the required columns exist before processing
+    required_columns = ['ID do Pedido', 'SKU', 'Valor da Venda', 'Tarifa ML', 'Frete', 'Custo de Envio', 'Custo', 'Lucro']
+    if not all(col in df.columns for col in required_columns):
+        raise ValueError("Dataframe does not contain all required columns.")
+
+    df['Total Items'] = df.groupby('ID do Pedido')['SKU'].transform('count')
+    
+    # Calculate the proportional values
+    df['Proportional Valor da Venda'] = df['Valor da Venda'] / df['Total Items']
+    df['Proportional Tarifa ML'] = df['Tarifa ML'] / df['Total Items']
+    df['Proportional Frete'] = df['Frete'] / df['Total Items']
+    df['Proportional Custo de Envio'] = df['Custo de Envio'] / df['Total Items']
+    df['Proportional Custo'] = df['Custo'] / df['Total Items']
+    df['Proportional Lucro'] = df['Lucro'] / df['Total Items']
+    
+    # Keep only the SKU rows
+    df = df.drop_duplicates(subset=['SKU'], keep='first')
+    
+    # Drop the package rows
+    df = df.drop(columns=['Total Items', 'Valor da Venda', 'Tarifa ML', 'Frete', 'Custo de Envio', 'Custo', 'Lucro'])
+    
+    return df
 
 def excel_column_range(start, end):
     """Generate Excel column labels between start and end inclusive."""

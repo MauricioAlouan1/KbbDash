@@ -44,7 +44,11 @@ column_rename_dict = {
         # Add other columns that need renaming for B_Estoq
     },
     'L_LPI': {
-        'Preço Com Desconto': 'VLRVENDA'
+        'Preço Com Desconto': 'VLRVENDA',
+        'SKU': 'CODPF'
+    },
+    'MLK_Vendas' : {
+        'PREÇO UNITÁRIO DE VENDA DO ANÚNCIO (BRL)': 'PRECOUNIT'
     }
     # Add dictionaries for other dataframes...
 }
@@ -75,6 +79,7 @@ column_format_dict = {
     },
     'L_LPI':{
         'VLRVENDA': '#,##0.00',        
+        'ECU': '#,##0.00',
     },
     # Add dictionaries for other dataframes...
 }
@@ -124,42 +129,34 @@ def merge_all_data(all_data):
 
     # compute column ANOMES
     compute_NFCI_ANOMES(all_data)
+    compute_LPI_ANOMES(all_data)
 
     # Merge O_NFCI with T_Remessas - REM
-    #print(f"Making column REM_NF in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_Remessas", "NomeF", "REM_NF", default_value=0)
 
     # Merge O_NFCI with T_Prodf - CODPP
-    #print(f"Making column CODPP in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "CodPF", "T_ProdF", "CodPF", "CODPP", default_value="xxx")
+    all_data = merge_data(all_data, "L_LPI", "CodPF", "T_ProdF", "CodPF", "CODPP", default_value="xxx")
 
     # Merge O_NFCI with T_GruposCli - G1
-    #print(f"Making column G1 in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_GruposCli", "NomeF", "G1", default_value="V")
 
     # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
-    #print(f"Making column ECU in O_NFCI")
     all_data = merge_data2v(all_data, "O_NFCI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=0)
+    all_data = merge_data2v(all_data, "L_LPI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=0)
  
     # Merge VENDEDOR with T_REPS for COMPCT
-    #print(f"Making column COMPCT in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "Vendedor", "T_Reps", "Vendedor", "COMISSPCT", default_value=0)
-#   df.rename(columns={'COMISS': 'COMPCT'}, inplace=True)
-#   all_data = merge_data(all_data, "O_NFCI", "VENDEDOR", "T_REPS", "VENDEDOR", "COMPCT", default_value="error")
 
     # Merge UF with T_Fretes for FretePCT
-    #print(f"Making column FretePCT in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "UF", "T_Fretes", "UF", "FRETEPCT", default_value=0)
 
     # Merge NomeF with T_Fretes for VerbaPct
-    #print(f"Making column VerbaPct in O_NFCI")
     all_data = merge_data(all_data, "O_NFCI", "NOMEF", "T_Verbas", "NomeF", "VERBAPCT", default_value=0)
-    #print(f"Finished making VerbaPCT")
 
     # Perform the merge (example merge, adjust as necessary)
-    print(f"Making column Empresa in L_LPI")
     all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "Empresa", default_value='erro')
-    print(f"Made column Empresa in L_LPI")
+    all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "MP", default_value='erro')
 
     
     for key, df in all_data.items():
@@ -287,6 +284,16 @@ def compute_NFCI_ANOMES(all_data):
         all_data[key] = df
     return all_data
 
+def compute_LPI_ANOMES(all_data):
+    for key, df in all_data.items():
+        # Add the ANOMES column to L_LPI
+        if key == 'L_LPI' and 'DATA' in df.columns:
+            df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')  # Ensure the date is parsed correctly
+            df['ANOMES'] = df['DATA'].dt.strftime('%y%m')  # Format date as YYMM
+            print(f"Added ANOMES column to {key}")
+        all_data[key] = df
+    return all_data
+
 def load_inventory_data(file_path):
     return pd.read_excel(file_path)
 
@@ -338,7 +345,6 @@ def excel_format(output_path, column_format_dict):
     workbook.save(output_path)
     print(f"All sheets formatted")
 
-
 def excel_autofilters(output_path):
     print("Adding auto-filters to all sheets")
     workbook = load_workbook(output_path)
@@ -376,7 +382,7 @@ def main():
 
     # Load static data
     static_tables = ['T_CondPagto.xlsx', 'T_Fretes.xlsx', 'T_GruposCli.xlsx', 'T_MP.xlsx', 
-                     'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx','T_Vol.xlsx', 'T_ProdF.xlsx', 'T_ProdP.xlsx', 'T_Entradas.xlsx']
+                     'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx','T_Vol.xlsx', 'T_ProdF.xlsx', 'T_ProdP.xlsx', 'T_Entradas.xlsx', 'T_FretesMP.xlsx']
     static_data_dict = {table.replace('.xlsx', ''): load_static_data(static_dir, table) for table in static_tables}
     
     # Check static data shapes
