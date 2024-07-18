@@ -124,43 +124,42 @@ def process_ml_data(df):
 
     # Step 1: Calculate the number of unique SKUs per order (excluding NaN SKUs)
     # Adjust the SKUs in Order count if it's greater than 1
-    df['SKUs in Order'] = df[df['SKU'].notna()].groupby('N.º de venda_hyperlink')['SKU'].transform('nunique')
-    df['SKUs in Order'] = df['SKUs in Order'].apply(lambda x: x-1 if x > 1 else x)
+    df['QtdSKUsPac'] = df[df['SKU'].notna()].groupby('N.º de venda_hyperlink')['SKU'].transform('nunique')
+    df['QtdSKUsPac'] = df['QtdSKUsPac'].apply(lambda x: x-1 if x > 1 else x)
 
     # Step 2: Calculate the total number of items per order
-    df['Items in Order'] = df.groupby('N.º de venda_hyperlink')['Quantidade'].transform('sum')
+    df['QtdItensPac'] = df.groupby('N.º de venda_hyperlink')['Quantidade'].transform('sum')
 
-    # Calculate total value per SKU
-    df['Total Value per SKU'] = df['Preço unitário de venda do anúncio (BRL)'] * df['Quantidade']
+    # Calculate VlrTotalpSKU
+    df['VlrTotalpSKU'] = df['Preço unitário de venda do anúncio (BRL)'] * df['Quantidade']
 
-    # Calculate total value per package
+    # Calculate VlrTotalpPac
     print ('Calcula totais')
-    #print(df['Receita por envio Pacote'].head())
-    df['Total Value per Package'] = df.groupby('N.º de venda_hyperlink')['Total Value per SKU'].transform('sum')
-    df['Receita por envio Pacote'] = df.groupby('N.º de venda_hyperlink')['Receita por envio (BRL)'].transform('sum')
-    df['Tarifa de venda Pacote'] = df.groupby('N.º de venda_hyperlink')['Tarifa de venda e impostos'].transform('sum')
-    df['Tarifa de envio Pacote'] = df.groupby('N.º de venda_hyperlink')['Tarifas de envio'].transform('sum')
-    df['Cancelamentos Pacote'] = df.groupby('N.º de venda_hyperlink')['Cancelamentos e reembolsos (BRL)'].transform('sum')
-    df['Repasse Pacote'] = df.groupby('N.º de venda_hyperlink')['Total (BRL)'].transform('sum')
+    #print(df['ReceitaEnvioTotPac'].head())
+    df['VlrTotalpPac'] = df.groupby('N.º de venda_hyperlink')['VlrTotalpSKU'].transform('sum')
+    df['ReceitaEnvioTotPac'] = df.groupby('N.º de venda_hyperlink')['Receita por envio (BRL)'].transform('sum')
+    df['TarifaVendaTotPac'] = df.groupby('N.º de venda_hyperlink')['Tarifa de venda e impostos'].transform('sum')
+    df['TarifaEnvioTotPac'] = df.groupby('N.º de venda_hyperlink')['Tarifas de envio'].transform('sum')
+    df['CancelamentosTotPac'] = df.groupby('N.º de venda_hyperlink')['Cancelamentos e reembolsos (BRL)'].transform('sum')
+    df['RepasseTotPac'] = df.groupby('N.º de venda_hyperlink')['Total (BRL)'].transform('sum')
 
     # Calculate proportional values
     print ('Calcula Valores Proporcionais')
-    #print(df['Receita por envio Pacote'].head())
+    #print(df['ReceitaEnvioTotPac'].head())
 
-    df['Proportional Receita por envio'] = df['Receita por envio Pacote'] * (df['Total Value per SKU'] / df['Total Value per Package'])
-    df['Proportional Tarifa de venda'] = df['Tarifa de venda Pacote'] * (df['Total Value per SKU'] / df['Total Value per Package'])
-    df['Proportional Tarifas de envio'] = df['Tarifa de envio Pacote'] * (df['Total Value per SKU'] / df['Total Value per Package'])
-    df['Proportional Cancelamentos e reembolsos'] = df['Cancelamentos Pacote'] * (df['Total Value per SKU'] / df['Total Value per Package'])
-    df['Proportional Repasse Pacote'] = df['Repasse Pacote'] * (df['Total Value per SKU'] / df['Total Value per Package'])
+    df['ReceitaEnvio'] = df['ReceitaEnvioTotPac'] * (df['VlrTotalpSKU'] / df['VlrTotalpPac'])
+    df['TarifaVenda'] = df['TarifaVendaTotPac'] * (df['VlrTotalpSKU'] / df['VlrTotalpPac'])
+    df['TarifaEnvio'] = df['TarifaEnvioTotPac'] * (df['VlrTotalpSKU'] / df['VlrTotalpPac'])
+    df['Cancelamentos'] = df['CancelamentosTotPac'] * (df['VlrTotalpSKU'] / df['VlrTotalpPac'])
+    df['Repasse'] = df['RepasseTotPac'] * (df['VlrTotalpSKU'] / df['VlrTotalpPac'])
     
     # Keep only the SKU rows
     df['SKU'] = df['SKU'].str.strip()
     df['SKU'].replace('', pd.NA, inplace=True)
     df = df.dropna(subset=['SKU'])
-    
+
     # Drop the calculation columns
-    #df = df.drop(columns=['Total Items', 'Valor da Venda', 'Tarifa ML', 'Frete', 'Custo de Envio', 'Custo', 'Lucro'])
-    
+    #df = df.drop(columns=['VlrTotalpPac', 'ReceitaEnvioTotPac', 'TarifaVendaTotPac', 'TarifaEnvioTotPac', 'CancelamentosTotPac', 'RepasseTotPac'])
     return df
 
 def excel_column_range(start, end):
