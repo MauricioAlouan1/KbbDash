@@ -99,25 +99,45 @@ def process_MLK_Vendas(data):
 
 def process_ml_data(df):
     # Ensure the required columns exist before processing
-    required_columns = ['ID do Pedido', 'SKU', 'Valor da Venda', 'Tarifa ML', 'Frete', 'Custo de Envio', 'Custo', 'Lucro']
+    required_columns = ['N.º de venda', 'SKU', 'Receita por produtos (BRL)', 'Receita por envio (BRL)', 'Tarifa de venda e impostos', 'Tarifas de envio', 'Cancelamentos e reembolsos (BRL)']
     if not all(col in df.columns for col in required_columns):
         raise ValueError("Dataframe does not contain all required columns.")
 
-    df['Total Items'] = df.groupby('ID do Pedido')['SKU'].transform('count')
-    
+    # Strip any whitespace from column names
+    df.columns = df.columns.str.strip()
+
+    # Rename only the first occurrence of 'Unidades'
+    unidades_columns = [i for i, col in enumerate(df.columns) if col == 'Unidades']
+    if unidades_columns:
+        first_unidades_index = unidades_columns[0]
+        df.columns.values[first_unidades_index] = 'Quantidade'
+
+    # Convert 'Unidades' to numeric, coerce errors to NaN, and then fill NaN with 0
+    df['Quantidade'] = pd.to_numeric(df['Quantidade'], errors='coerce').fillna(0)
+
+    # Step 1: Calculate the number of unique SKUs per order (excluding NaN SKUs)
+    # Adjust the SKUs in Order count if it's greater than 1
+    df['SKUs in Order'] = df[df['SKU'].notna()].groupby('N.º de venda_hyperlink')['SKU'].transform('nunique')
+    df['SKUs in Order'] = df['SKUs in Order'].apply(lambda x: x-1 if x > 1 else x)
+
+
+    # Step 2: Calculate the total number of items per order
+    df['Items in Order'] = df.groupby('N.º de venda_hyperlink')['Quantidade'].transform('sum')
+
+
     # Calculate the proportional values
-    df['Proportional Valor da Venda'] = df['Valor da Venda'] / df['Total Items']
-    df['Proportional Tarifa ML'] = df['Tarifa ML'] / df['Total Items']
-    df['Proportional Frete'] = df['Frete'] / df['Total Items']
-    df['Proportional Custo de Envio'] = df['Custo de Envio'] / df['Total Items']
-    df['Proportional Custo'] = df['Custo'] / df['Total Items']
-    df['Proportional Lucro'] = df['Lucro'] / df['Total Items']
+    #df['Proportional Valor da Venda'] = df['Valor da Venda'] / df['Total Items']
+    #df['Proportional Tarifa ML'] = df['Tarifa ML'] / df['Total Items']
+    #df['Proportional Frete'] = df['Frete'] / df['Total Items']
+    #df['Proportional Custo de Envio'] = df['Custo de Envio'] / df['Total Items']
+    #df['Proportional Custo'] = df['Custo'] / df['Total Items']
+    #df['Proportional Lucro'] = df['Lucro'] / df['Total Items']
     
     # Keep only the SKU rows
-    df = df.drop_duplicates(subset=['SKU'], keep='first')
+    #df = df.drop_duplicates(subset=['SKU'], keep='first')
     
     # Drop the package rows
-    df = df.drop(columns=['Total Items', 'Valor da Venda', 'Tarifa ML', 'Frete', 'Custo de Envio', 'Custo', 'Lucro'])
+    #df = df.drop(columns=['Total Items', 'Valor da Venda', 'Tarifa ML', 'Frete', 'Custo de Envio', 'Custo', 'Lucro'])
     
     return df
 
@@ -134,7 +154,6 @@ def excel_column_range(start, end):
             col = chr(65 + remainder) + col
         columns.append(col)
     return columns
-
 
 def load_and_clean_data(filepath, processor, header_name, extract_hyperlinks=False):
     """Load data from an Excel file, handle merged headers, optionally extract hyperlinks."""
@@ -163,7 +182,6 @@ def extract_month_year_from_filename(filename):
     else:
         return "Unknown"
 
-
 def convert_currency_to_float(currency_str):
     """Convert currency string 'R$ 149,90' to float 149.90, handle mixed data types."""
     if pd.isna(currency_str):
@@ -179,7 +197,6 @@ def convert_currency_to_float(currency_str):
     except ValueError:
         print(f"Conversion error with input '{currency_str}'")
         return None
-
     
 def check_and_process_files():
     raw_dir = os.path.join(base_dir, 'raw')
@@ -217,9 +234,8 @@ def check_and_process_files():
                         else:
                             print(f"Skipped {file}, already processed.")
 
-
 def extract_hyperlinks_data(filepath, header_name):
-    """Extract data and concatenate text with hyperlinks, ensuring updates are saved."""
+    """Extract data and create a new column for hyperlinks for a specific header."""
     wb = openpyxl.load_workbook(filepath, data_only=False)
     ws = wb.active
     data_rows = []
@@ -232,22 +248,21 @@ def extract_hyperlinks_data(filepath, header_name):
             if any(header_name == (cell.value or '') for cell in row):
                 header_row_index = row[0].row
                 headers = [cell.value for cell in row]
+                headers.append(f"{header_name}_hyperlink")
                 continue
         if header_row_index and row[0].row > header_row_index:
             row_data = []
+            hyperlink_value = None
             for cell in row:
-                if cell.hyperlink:
+                if cell.column == headers.index(header_name) + 1 and cell.hyperlink:
                     # Replace specific parts of the hyperlink
-                    hyperlink_replaced = cell.hyperlink.target.replace("https://www.mercadolivre.com.br/vendas/", "##")
-                    hyperlink_replaced = hyperlink_replaced.replace("/detalhe#source=excel", "##")
-                    cell_value = f"{cell.value}|>{hyperlink_replaced}"  # Concatenate value and modified hyperlink
-                else:
-                    cell_value = cell.value
-                row_data.append(cell_value)
+                    hyperlink_replaced = cell.hyperlink.target.replace("https://www.mercadolivre.com.br/vendas/", "").replace("/detalhe#source=excel", "")
+                    hyperlink_value = hyperlink_replaced
+                row_data.append(cell.value)
+            row_data.append(hyperlink_value)
             data_rows.append(row_data)
 
     return pd.DataFrame(data_rows, columns=headers)
-
 
 def find_header_row(filepath, header_name):
     """Utility function to find the header row index using pandas."""
@@ -256,13 +271,10 @@ def find_header_row(filepath, header_name):
             return i
     raise ValueError(f"Header {header_name} not found in the file.")
 
-
 def save_cleaned_data(data, output_filepath):
     """Save the cleaned data to a new Excel file."""
     os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
     data.to_excel(output_filepath, index=False)
 
-
 if __name__ == "__main__":
     check_and_process_files()
-
