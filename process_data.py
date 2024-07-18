@@ -112,31 +112,53 @@ def process_ml_data(df):
         first_unidades_index = unidades_columns[0]
         df.columns.values[first_unidades_index] = 'Quantidade'
 
-    # Convert 'Unidades' to numeric, coerce errors to NaN, and then fill NaN with 0
+    # Convert to numeric, coerce errors to NaN, and then fill NaN with 0
+    print ('Convert to numeric')
     df['Quantidade'] = pd.to_numeric(df['Quantidade'], errors='coerce').fillna(0)
+    df['Preço unitário de venda do anúncio (BRL)'] = pd.to_numeric(df['Preço unitário de venda do anúncio (BRL)'], errors='coerce').fillna(0)
+    df['Receita por envio (BRL)'] = pd.to_numeric(df['Receita por envio (BRL)'], errors='coerce').fillna(0)
+    df['Tarifa de venda e impostos'] = pd.to_numeric(df['Tarifa de venda e impostos'], errors='coerce').fillna(0)
+    df['Tarifas de envio'] = pd.to_numeric(df['Tarifas de envio'], errors='coerce').fillna(0)
+    df['Cancelamentos e reembolsos (BRL)'] = pd.to_numeric(df['Cancelamentos e reembolsos (BRL)'], errors='coerce').fillna(0)
+    df['Total (BRL)'] = pd.to_numeric(df['Total (BRL)'], errors='coerce').fillna(0)
 
     # Step 1: Calculate the number of unique SKUs per order (excluding NaN SKUs)
     # Adjust the SKUs in Order count if it's greater than 1
     df['SKUs in Order'] = df[df['SKU'].notna()].groupby('N.º de venda_hyperlink')['SKU'].transform('nunique')
     df['SKUs in Order'] = df['SKUs in Order'].apply(lambda x: x-1 if x > 1 else x)
 
-
     # Step 2: Calculate the total number of items per order
     df['Items in Order'] = df.groupby('N.º de venda_hyperlink')['Quantidade'].transform('sum')
 
+    # Calculate total value per SKU
+    df['Total Value per SKU'] = df['Preço unitário de venda do anúncio (BRL)'] * df['Quantidade']
 
-    # Calculate the proportional values
-    #df['Proportional Valor da Venda'] = df['Valor da Venda'] / df['Total Items']
-    #df['Proportional Tarifa ML'] = df['Tarifa ML'] / df['Total Items']
-    #df['Proportional Frete'] = df['Frete'] / df['Total Items']
-    #df['Proportional Custo de Envio'] = df['Custo de Envio'] / df['Total Items']
-    #df['Proportional Custo'] = df['Custo'] / df['Total Items']
-    #df['Proportional Lucro'] = df['Lucro'] / df['Total Items']
+    # Calculate total value per package
+    print ('Calcula totais')
+    #print(df['Receita por envio Pacote'].head())
+    df['Total Value per Package'] = df.groupby('N.º de venda_hyperlink')['Total Value per SKU'].transform('sum')
+    df['Receita por envio Pacote'] = df.groupby('N.º de venda_hyperlink')['Receita por envio (BRL)'].transform('sum')
+    df['Tarifa de venda Pacote'] = df.groupby('N.º de venda_hyperlink')['Tarifa de venda e impostos'].transform('sum')
+    df['Tarifa de envio Pacote'] = df.groupby('N.º de venda_hyperlink')['Tarifas de envio'].transform('sum')
+    df['Cancelamentos Pacote'] = df.groupby('N.º de venda_hyperlink')['Cancelamentos e reembolsos (BRL)'].transform('sum')
+    df['Repasse Pacote'] = df.groupby('N.º de venda_hyperlink')['Total (BRL)'].transform('sum')
+
+    # Calculate proportional values
+    print ('Calcula Valores Proporcionais')
+    #print(df['Receita por envio Pacote'].head())
+
+    df['Proportional Receita por envio'] = df['Receita por envio Pacote'] * (df['Total Value per SKU'] / df['Total Value per Package'])
+    df['Proportional Tarifa de venda'] = df['Tarifa de venda Pacote'] * (df['Total Value per SKU'] / df['Total Value per Package'])
+    df['Proportional Tarifas de envio'] = df['Tarifa de envio Pacote'] * (df['Total Value per SKU'] / df['Total Value per Package'])
+    df['Proportional Cancelamentos e reembolsos'] = df['Cancelamentos Pacote'] * (df['Total Value per SKU'] / df['Total Value per Package'])
+    df['Proportional Repasse Pacote'] = df['Repasse Pacote'] * (df['Total Value per SKU'] / df['Total Value per Package'])
     
     # Keep only the SKU rows
-    #df = df.drop_duplicates(subset=['SKU'], keep='first')
+    df['SKU'] = df['SKU'].str.strip()
+    df['SKU'].replace('', pd.NA, inplace=True)
+    df = df.dropna(subset=['SKU'])
     
-    # Drop the package rows
+    # Drop the calculation columns
     #df = df.drop(columns=['Total Items', 'Valor da Venda', 'Tarifa ML', 'Frete', 'Custo de Envio', 'Custo', 'Lucro'])
     
     return df
