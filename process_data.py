@@ -116,6 +116,29 @@ def rename_repeated_columns(df):
     df.columns = new_columns
     return df
 
+def propagate_package_info(df): 
+    # Define the columns to propagate
+    columns_to_propagate = [
+        'Mês de faturamento das suas tarifas', 'NF-e em anexo', 'Dados pessoais ou da empresa', 'Tipo e número do documento',
+        'Endereço', 'Comprador', 'CPF', 'Endereço', 'Cidade', 'Status', 'CEP', 'País',
+        'Forma de entrega', 'Data a caminho', 'Data de entrega', 'Motorista', 'Número de rastreamento'
+    ]
+
+    # Identify package rows (rows where SKU is NaN)
+    package_rows = df[df['SKU'].isna()]
+
+    for idx, package_row in package_rows.iterrows():
+        # Get the order ID
+        order_id = package_row['N.º de venda_hyperlink']
+        
+        # Get the SKU rows for this package
+        sku_rows = df[(df['N.º de venda_hyperlink'] == order_id) & df['SKU'].notna()]
+        
+        for col in columns_to_propagate:
+            df.loc[sku_rows.index, col] = package_row[col]
+    
+    return df
+
 def process_ml_data(df):
     # Ensure the required columns exist before processing
     required_columns = ['N.º de venda', 'SKU', 'Receita por produtos (BRL)', 'Receita por envio (BRL)', 'Tarifa de venda e impostos', 'Tarifas de envio', 'Cancelamentos e reembolsos (BRL)']
@@ -172,9 +195,10 @@ def process_ml_data(df):
     df['Cancelamentos'] = df['CancelamentosTotPac'] * (df['VlrTotalpSKU'] / df['VlrTotalpPac'])
     df['Repasse'] = df['RepasseTotPac'] * (df['VlrTotalpSKU'] / df['VlrTotalpPac'])
     
-    # Keep only the SKU rows
+    # Propagate package information to SKU rows and Keep only the SKU rows
     df['SKU'] = df['SKU'].str.strip()
     df['SKU'] = df['SKU'].replace('', pd.NA)
+    df = propagate_package_info(df)
     df = df.dropna(subset=['SKU'])
 
     # Drop the calculation columns
