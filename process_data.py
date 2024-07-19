@@ -97,6 +97,25 @@ def process_MLK_Vendas(data):
     #data = data[data['N.º de venda'].notna()]
     return data
 
+def rename_repeated_columns(df):
+    """Rename repeated columns by appending a number to each repeated column name."""
+    columns = df.columns
+    new_columns = []
+    counts = {}
+
+    for col in columns:
+        if col in counts:
+            counts[col] += 1
+            new_col = f"{col}{counts[col]:02d}"
+        else:
+            counts[col] = 0
+            new_col = col
+        
+        new_columns.append(new_col)
+    
+    df.columns = new_columns
+    return df
+
 def process_ml_data(df):
     # Ensure the required columns exist before processing
     required_columns = ['N.º de venda', 'SKU', 'Receita por produtos (BRL)', 'Receita por envio (BRL)', 'Tarifa de venda e impostos', 'Tarifas de envio', 'Cancelamentos e reembolsos (BRL)']
@@ -106,11 +125,11 @@ def process_ml_data(df):
     # Strip any whitespace from column names
     df.columns = df.columns.str.strip()
 
-    # Rename only the first occurrence of 'Unidades'
-    unidades_columns = [i for i, col in enumerate(df.columns) if col == 'Unidades']
-    if unidades_columns:
-        first_unidades_index = unidades_columns[0]
-        df.columns.values[first_unidades_index] = 'Quantidade'
+    # Rename repeated columns
+    df = rename_repeated_columns(df)
+
+    df.rename(columns={"Unidades": "Quantidade"}, inplace = True)
+    df.rename(columns={"Data de entrega01": "Data de devolucao"}, inplace = True)
 
     # Convert to numeric, coerce errors to NaN, and then fill NaN with 0
     print ('Convert to numeric')
@@ -155,11 +174,18 @@ def process_ml_data(df):
     
     # Keep only the SKU rows
     df['SKU'] = df['SKU'].str.strip()
-    df['SKU'].replace('', pd.NA, inplace=True)
+    df['SKU'] = df['SKU'].replace('', pd.NA)
     df = df.dropna(subset=['SKU'])
 
     # Drop the calculation columns
-    #df = df.drop(columns=['VlrTotalpPac', 'ReceitaEnvioTotPac', 'TarifaVendaTotPac', 'TarifaEnvioTotPac', 'CancelamentosTotPac', 'RepasseTotPac'])
+    cols_to_drop = ['VlrTotalpPac', 'ReceitaEnvioTotPac', 'TarifaVendaTotPac', 'TarifaEnvioTotPac', 'CancelamentosTotPac', 'RepasseTotPac']
+    cols_to_drop.extend(['Receita por produtos (BRL)', 'Receita por envio (BRL)', 'Tarifa de venda e impostos',	'Tarifas de envio',	'Cancelamentos e reembolsos (BRL)',	'Total (BRL)'])
+    cols_to_drop.extend(['Unidades01', 'Unidades02', 'URL de acompanhamento', 'URL de acompanhamento01', 'Número de rastreamento', 'País', 'Tipo de contribuinte',	'Inscrição estadual'])
+    cols_to_drop.extend(['Forma de entrega', 'Forma de entrega01', 'Data a caminho', 'Data a caminho01', 'Motorista', 'Motorista01'])
+    df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
+
+    #df.drop(columns=['VlrTotalpPac', 'ReceitaEnvioTotPac', 'TarifaVendaTotPac', 'TarifaEnvioTotPac', 'CancelamentosTotPac', 'RepasseTotPac'])
+    #df.drop(columns=['Unidades', 'URL de acompanhamento', 'Número de rastreamento', 'xx'], errors = 'ignore')
     return df
 
 def excel_column_range(start, end):
