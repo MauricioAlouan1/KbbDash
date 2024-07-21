@@ -57,6 +57,7 @@ column_format_dict = {
     'O_NFCI': {
         'EMISS': 'DD-MMM-YY',
         'QTD': '0',
+        'PRECO CALC': '#,##0.00',
         'MERCVLR': '#,##0.00',
         'ICMSST': '#,##0.00',
         'IPI': '#,##0.00',
@@ -188,9 +189,9 @@ def merge_all_data(all_data):
             df['MARGPCT'] = df['MARGVLR'] / df['MERCVLR']
 
         elif key == 'L_LPI':
-            # Create a new calculated column (example calculation, adjust as necessary)
-            df['NewCalculatedField'] = df['VLRVENDA'] * (0.9)
-  
+            # Add the 'Valido' column directly
+            df['Valido'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
+
         # Update the dataframe in all_data
         all_data[key] = df
 
@@ -378,6 +379,13 @@ def main():
     for key, pattern in file_patterns.items():
         recent_data = load_recent_data(base_dir, pattern)
         print(f"{key} data shape: {recent_data.shape}")  # Debug print
+
+        # Ensure 'N.º de venda' is treated as string if the column exists
+        if 'N.º de venda' in recent_data.columns:
+            recent_data['N.º de venda'] = recent_data['N.º de venda'].astype(str)
+        if 'N.º de venda_hyperlink' in recent_data.columns:
+            recent_data['N.º de venda_hyperlink'] = recent_data['N.º de venda_hyperlink'].astype(str)
+
         all_data[key] = recent_data
 
     # Load static data

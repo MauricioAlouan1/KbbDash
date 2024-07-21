@@ -21,14 +21,11 @@ else:
 
 print("Base directory set to:", base_dir)
 
-
 def find_header_row(filepath, header_name):
-    """Find the header row index that contains a specific header name in an Excel file, handle merged cells."""
-    temp_data = pd.read_excel(filepath, header=None)
-    for index, row in temp_data.iterrows():
+    """Utility function to find the header row index using pandas."""
+    for i, row in pd.read_excel(filepath, header=None).iterrows():
         if header_name in row.values:
-            print(f"Header '{header_name}' found at row index: {index}")
-            return index
+            return i
     raise ValueError(f"Header {header_name} not found in the file.")
 
 def process_O_NFSI(data):
@@ -335,12 +332,6 @@ def extract_hyperlinks_data(filepath, header_name):
 
     return pd.DataFrame(data_rows, columns=headers)
 
-def find_header_row(filepath, header_name):
-    """Utility function to find the header row index using pandas."""
-    for i, row in pd.read_excel(filepath, header=None).iterrows():
-        if header_name in row.values:
-            return i
-    raise ValueError(f"Header {header_name} not found in the file.")
 
 def save_cleaned_data(data, output_filepath):
     """Save the cleaned data to a new Excel file."""
