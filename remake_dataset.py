@@ -85,6 +85,11 @@ column_format_dict = {
         'VLRVENDA': '#,##0.00',        
         'ECU': '#,##0.00',
     },
+    'MLK_Vendas':{
+        'MARGVLR': '#,##0.00',        
+        'MARGPCT': '0.00%',
+    },
+
     # Add dictionaries for other dataframes...
 }
 
@@ -227,7 +232,7 @@ def merge_all_data(all_data):
 
         elif key == 'MLA_Vendas':
             # Add the 'Valido' column directly
-            df['Imposto1'] = df['VLRTOTALPSKU']*(-0.11)
+            df['Imposto1'] = df['VLRTOTALPSKU']*(0.11)
             df['Imposto2'] = 0
             df['ImpostoT'] =  df['Imposto1'] + df['Imposto2']
 
@@ -239,8 +244,8 @@ def merge_all_data(all_data):
             df['ECT'] = df['ECU'] * df['QTD']
 
             # Add the 'Valido' column directly
-            df['Imposto1'] = df['VLRTOTALPSKU']*(-0.0925)
-            df['Imposto2'] = df['VLRTOTALPSKU']*(-0.18)
+            df['Imposto1'] = df['VLRTOTALPSKU']*(0.0925)
+            df['Imposto2'] = df['VLRTOTALPSKU']*(0.18)
             df['ImpostoT'] =  df['Imposto1'] + df['Imposto2']
 
             # Create column MargCVlr
