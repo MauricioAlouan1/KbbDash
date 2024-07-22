@@ -3,6 +3,7 @@ import os
 from datetime import datetime, timedelta
 from openpyxl import load_workbook
 from openpyxl.styles import NamedStyle, Font, PatternFill, Alignment
+import re
 
 # Define the potential base directories
 path_options = [
@@ -45,10 +46,12 @@ column_rename_dict = {
     },
     'L_LPI': {
         'Preço Com Desconto': 'VLRVENDA',
-        'SKU': 'CODPF'
+        'SKU': 'CODPF',
+        'Vendas': 'QTD'
     },
     'MLK_Vendas' : {
-        'PREÇO UNITÁRIO DE VENDA DO ANÚNCIO (BRL)': 'PRECOUNIT'
+        'PREÇO UNITÁRIO DE VENDA DO ANÚNCIO (BRL)': 'PRECOUNIT',
+        'Quantidade' : 'QTD'
     }
     # Add dictionaries for other dataframes...
 }
@@ -125,12 +128,15 @@ def standardize_text_case(df):
     return df
 
 def merge_all_data(all_data):
+    print(f"Creating Merged and Calculated Columns")
+
     # Ensure all relevant columns are in uppercase for case-insensitive comparison
     all_data = {key: standardize_text_case(df) for key, df in all_data.items()}
 
     # compute column ANOMES
     compute_NFCI_ANOMES(all_data)
     compute_LPI_ANOMES(all_data)
+    compute_ML_ANOMES(all_data)
 
     # Merge O_NFCI with T_Remessas - REM
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_Remessas", "NomeF", "REM_NF", default_value=0)
@@ -138,6 +144,8 @@ def merge_all_data(all_data):
     # Merge O_NFCI with T_Prodf - CODPP
     all_data = merge_data(all_data, "O_NFCI", "CodPF", "T_ProdF", "CodPF", "CODPP", default_value="xxx")
     all_data = merge_data(all_data, "L_LPI", "CodPF", "T_ProdF", "CodPF", "CODPP", default_value="xxx")
+    all_data = merge_data(all_data, "MLA_Vendas", "SKU", "T_ProdF", "CodPF", "CODPP", default_value="xxx")
+    all_data = merge_data(all_data, "MLK_Vendas", "SKU", "T_ProdF", "CodPF", "CODPP", default_value="xxx")
 
     # Merge O_NFCI with T_GruposCli - G1
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_GruposCli", "NomeF", "G1", default_value="V")
@@ -145,6 +153,8 @@ def merge_all_data(all_data):
     # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
     all_data = merge_data2v(all_data, "O_NFCI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=0)
     all_data = merge_data2v(all_data, "L_LPI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=0)
+    all_data = merge_data2v(all_data, "MLA_Vendas", "ANOMES", "SKU", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=0)
+    all_data = merge_data2v(all_data, "MLK_Vendas", "ANOMES", "SKU", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=0)
  
     # Merge VENDEDOR with T_REPS for COMPCT
     all_data = merge_data(all_data, "O_NFCI", "Vendedor", "T_Reps", "Vendedor", "COMISSPCT", default_value=0)
@@ -191,6 +201,54 @@ def merge_all_data(all_data):
         elif key == 'L_LPI':
             # Add the 'Valido' column directly
             df['Valido'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
+            df['ECT'] = df['ECU'] * df['QTD']
+
+            # Add the 'TipoAnuncio' column directly
+            if 'MLK_Vendas' in all_data:
+                df = df.merge(
+                    all_data['MLK_Vendas'][['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO']],
+                    left_on='CÓDIGO PEDIDO',
+                    right_on='N.º DE VENDA_HYPERLINK',
+                    how='left'
+                )
+                df['TipoAnuncio'] = df.apply(lambda row: row['TIPO DE ANÚNCIO'] if row['EMPRESA'] == 'K' and row['MP'] == 'ML' else None, axis=1)
+                df.drop(columns=['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO'], inplace=True)
+
+            # Add the 'TipoAnuncio' column for 'A' and lookup in 'MLA_Vendas'
+            if 'MLA_Vendas' in all_data:
+                df = df.merge(
+                    all_data['MLA_Vendas'][['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO']],
+                    left_on='CÓDIGO PEDIDO',
+                    right_on='N.º DE VENDA_HYPERLINK',
+                    how='left'
+                )
+                df['TipoAnuncio'] = df.apply(lambda row: row['TIPO DE ANÚNCIO'] if row['EMPRESA'] == 'A' and row['MP'] == 'ML' else row['TipoAnuncio'], axis=1)
+                df.drop(columns=['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO'], inplace=True)
+
+        elif key == 'MLA_Vendas':
+            # Add the 'Valido' column directly
+            df['Imposto1'] = df['VLRTOTALPSKU']*(-0.11)
+            df['Imposto2'] = 0
+            df['ImpostoT'] =  df['Imposto1'] + df['Imposto2']
+
+            cols_to_drop = ['CODPF_x', 'CODPF_y']
+            df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
+
+        elif key == 'MLK_Vendas':
+            # Create column ECT (ECU x QTD)
+            df['ECT'] = df['ECU'] * df['QTD']
+
+            # Add the 'Valido' column directly
+            df['Imposto1'] = df['VLRTOTALPSKU']*(-0.0925)
+            df['Imposto2'] = df['VLRTOTALPSKU']*(-0.18)
+            df['ImpostoT'] =  df['Imposto1'] + df['Imposto2']
+
+            # Create column MargCVlr
+            df['MARGVLR'] = df['REPASSE'] - df['ImpostoT'] - df['ECT'] - (1)
+            df['MARGPCT'] = df['MARGVLR'] / df['VLRTOTALPSKU']
+
+            cols_to_drop = ['CODPF_x', 'CODPF_y']
+            df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
 
         # Update the dataframe in all_data
         all_data[key] = df
@@ -222,14 +280,14 @@ def merge_data(all_data, df1_name, df1_col, df2_name, df2_col, new_col=None, ind
         df1.columns = [col.upper() for col in df1.columns]
         df2.columns = [col.upper() for col in df2.columns]
 
-        print(f"Columns in {df1_name} before merge: {df1.columns}")
-        print(f"Columns in {df2_name} before merge: {df2.columns}")
-
         if df1_col not in df1.columns or df2_col not in df2.columns:
             raise KeyError(f"Column '{df1_col}' or '{df2_col}' not found in dataframes.")
 
         df2_cols = [df2_col] + ([new_col] if new_col else [])
-        merged_df = df1.merge(df2[df2_cols].drop_duplicates(), left_on=df1_col, right_on=df2_col, how='left', indicator=indicator_name)
+        merged_df = df1.merge(df2[df2_cols].drop_duplicates(), left_on=df1_col, right_on=df2_col, how='left', indicator=indicator_name, suffixes=('', '_DROP'))
+
+        # Remove the '_DROP' columns
+        merged_df.drop([col for col in merged_df.columns if col.endswith('_DROP')], axis=1, inplace=True)
 
         if indicator_name and default_value is not None:
             merged_df[indicator_name] = merged_df[indicator_name].apply(lambda x: default_value if x == 'left_only' else merged_df[new_col])
@@ -240,12 +298,12 @@ def merge_data(all_data, df1_name, df1_col, df2_name, df2_col, new_col=None, ind
         all_data[df1_name] = merged_df
     return all_data
 
-def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2_col2, value_col, new_col_name, default_value=None):
+def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2_col2, df2_val_col, new_col_name, default_value=None, negative=False):
     df1_col1 = df1_col1.upper()
     df1_col2 = df1_col2.upper()
     df2_col1 = df2_col1.upper()
     df2_col2 = df2_col2.upper()
-    value_col = value_col.upper()
+    df2_val_col = df2_val_col.upper()
     new_col_name = new_col_name.upper()
 
     if df1_name in all_data and df2_name in all_data:
@@ -256,22 +314,25 @@ def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2
         df1.columns = [col.upper() for col in df1.columns]
         df2.columns = [col.upper() for col in df2.columns]
 
-        print(f"Columns in {df1_name} before merge: {df1.columns}")
-        print(f"Columns in {df2_name} before merge: {df2.columns}")
+        #print(f"Columns in {df1_name} before merge: {df1.columns}")
+        #print(f"Columns in {df2_name} before merge: {df2.columns}")
 
         if df1_col1 not in df1.columns or df1_col2 not in df1.columns or df2_col1 not in df2.columns or df2_col2 not in df2.columns:
             raise KeyError(f"One of the columns '{df1_col1}', '{df1_col2}', '{df2_col1}', '{df2_col2}' not found in dataframes.")
 
-        df2_cols = [df2_col1, df2_col2, value_col]
+        if negative:
+            df2[df2_val_col] = df2[df2_val_col] * -1  # Make the VALUE column negative
+
+        df2_cols = [df2_col1, df2_col2, df2_val_col]
         merged_df = df1.merge(df2[df2_cols].drop_duplicates(), left_on=[df1_col1, df1_col2], right_on=[df2_col1, df2_col2], how='left')
 
-        if value_col and default_value is not None:
-            merged_df[value_col] = merged_df[value_col].fillna(default_value)
+        if df2_val_col and default_value is not None:
+            merged_df[df2_val_col] = merged_df[df2_val_col].fillna(default_value)
 
         # Rename the value column to the new column name
-        merged_df.rename(columns={value_col: new_col_name}, inplace=True)
+        merged_df.rename(columns={df2_val_col: new_col_name}, inplace=True)
 
-        print(f"Columns after merge: {merged_df.columns}")
+        #print(f"Columns after merge: {merged_df.columns}")
         all_data[df1_name] = merged_df
     return all_data
 
@@ -291,6 +352,55 @@ def compute_LPI_ANOMES(all_data):
         if key == 'L_LPI' and 'DATA' in df.columns:
             df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')  # Ensure the date is parsed correctly
             df['ANOMES'] = df['DATA'].dt.strftime('%y%m')  # Format date as YYMM
+            print(f"Added ANOMES column to {key}")
+        all_data[key] = df
+    return all_data
+
+def compute_ML_ANOMES(all_data):
+    for key, df in all_data.items():
+        # Add the ANOMES column to MLA_Vendas and MLK_Vendas
+        if key in ['MLA_Vendas', 'MLK_Vendas'] and 'DATA DA VENDA' in df.columns:
+            # Use dateutil parser to parse the date string
+            df['DATA DA VENDA'] = df['DATA DA VENDA'].apply(lambda x: parser.parse(x, fuzzy=True) if pd.notnull(x) else pd.NaT)
+            df['ANOMES'] = df['DATA DA VENDA'].dt.strftime('%y%m')  # Format date as YYMM
+            print(f"Added ANOMES column to {key}")
+        all_data[key] = df
+    return all_data
+
+def compute_LPI_ANOMES(all_data):
+    for key, df in all_data.items():
+        # Add the ANOMES column to L_LPI
+        if key == 'L_LPI' and 'DATA' in df.columns:
+            df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')  # Ensure the date is parsed correctly
+            df['ANOMES'] = df['DATA'].dt.strftime('%y%m')  # Format date as YYMM
+            print(f"Added ANOMES column to {key}")
+        all_data[key] = df
+    return all_data
+
+def mlcustom_date_parser(date_str):
+    # Remove the 'hs.' part if it exists
+    date_str = re.sub(r'\s*hs\.\s*$', '', date_str)
+    
+    # Replace the Portuguese month names with English month names
+    month_map = {
+        'JANEIRO': 'January', 'FEVEREIRO': 'February', 'MARÇO': 'March', 'ABRIL': 'April',
+        'MAIO': 'May', 'JUNHO': 'June', 'JULHO': 'July', 'AGOSTO': 'August',
+        'SETEMBRO': 'September', 'OUTUBRO': 'October', 'NOVEMBRO': 'November', 'DEZEMBRO': 'December'
+    }
+    
+    for pt_month, en_month in month_map.items():
+        date_str = date_str.replace(pt_month, en_month)
+    
+    # Parse the date
+    return pd.to_datetime(date_str, format='%d DE %B DE %Y %H:%M HS.')
+
+def compute_ML_ANOMES(all_data):
+    for key, df in all_data.items():
+        # Add the ANOMES column to MLA_Vendas and MLK_Vendas
+        if key in ['MLA_Vendas', 'MLK_Vendas'] and 'DATA DA VENDA' in df.columns:
+            # Use custom date parser to parse the date string
+            df['DATA DA VENDA'] = df['DATA DA VENDA'].apply(lambda x: mlcustom_date_parser(x) if pd.notnull(x) else pd.NaT)
+            df['ANOMES'] = df['DATA DA VENDA'].dt.strftime('%y%m')  # Format date as YYMM
             print(f"Added ANOMES column to {key}")
         all_data[key] = df
     return all_data
