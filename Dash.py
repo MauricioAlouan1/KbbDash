@@ -1,44 +1,108 @@
+from dash import dcc, html, Input, Output
 import dash
-from dash import dcc, html
-from dash.dependencies import Input, Output
-import dash_bootstrap_components as dbc
-
-# Import views
+import pandas as pd
 from Dash_overview import overview_layout
-from Dash_sheetview import sheet_view_layout
-from Dash_salesmargin import sales_margin_layout
+from Dash_sheetview import sheetview_layout
+from Dash_salesmargin import salesmargin_layout
 
 # Initialize the app
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
-server = app.server
+app = dash.Dash(__name__)
 
-# Define the layout with navigation
-app.layout = html.Div([
-    dcc.Location(id='url', refresh=False),
-    dbc.NavbarSimple(
-        children=[
-            dbc.NavItem(dbc.NavLink("Overview", href="/")),
-            dbc.NavItem(dbc.NavLink("Sheet View", href="/sheet-view")),
-            dbc.NavItem(dbc.NavLink("Sales & Margin", href="/sales-margin")),
-        ],
-        brand="Dashboard",
-        brand_href="/",
-        color="primary",
-        dark=True,
+# Load your data
+def load_data():
+    path_options = [
+        '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/merged_data.xlsx',
+        '/Users/simon/Library/CloudStorage/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/merged_data.xlsx'
+    ]
+    for path in path_options:
+        if os.path.exists(path):
+            df = pd.read_excel(path)
+            return df
+    return None
+
+# Define the filters
+filters = html.Div([
+    dcc.DatePickerRange(
+        id='date-picker-range',
+        start_date='2024-01-01',
+        end_date='2024-12-31',
+        display_format='YYYY-MM-DD'
     ),
-    html.Div(id='page-content')
+    dcc.Dropdown(
+        id='company-filter',
+        options=[
+            {'label': 'Company A', 'value': 'A'},
+            {'label': 'Company K', 'value': 'K'}
+        ],
+        placeholder='Select a company'
+    ),
+    dcc.Dropdown(
+        id='product-filter',
+        options=[
+            # Add options dynamically or manually
+        ],
+        placeholder='Select a product'
+    )
 ])
 
-# Define callback to update page content
-@app.callback(Output('page-content', 'children'),
-              Input('url', 'pathname'))
-def display_page(pathname):
-    if pathname == '/sheet-view':
-        return sheet_view_layout
-    elif pathname == '/sales-margin':
-        return sales_margin_layout
-    else:
+# Update the layout
+app.layout = html.Div([
+    dcc.Tabs(id='tabs', value='overview', children=[
+        dcc.Tab(label='Overview', value='overview'),
+        dcc.Tab(label='Sheet View', value='sheetview'),
+        dcc.Tab(label='Sales and Margin', value='salesmargin')
+    ]),
+    html.Div(id='tabs-content'),
+    filters,
+    dcc.Graph(id='main-graph')
+])
+
+@app.callback(Output('tabs-content', 'children'), [Input('tabs', 'value')])
+def render_content(tab):
+    if tab == 'overview':
         return overview_layout
+    elif tab == 'sheetview':
+        return sheetview_layout
+    elif tab == 'salesmargin':
+        return salesmargin_layout
+
+@app.callback(
+    Output('main-graph', 'figure'),
+    [
+        Input('date-picker-range', 'start_date'),
+        Input('date-picker-range', 'end_date'),
+        Input('company-filter', 'value'),
+        Input('product-filter', 'value')
+    ]
+)
+def update_graph(start_date, end_date, company, product):
+    # Load and filter your data based on the filter inputs
+    df = load_data()  # Your function to load data
+    if df is None:
+        return {}
+    
+    if start_date:
+        df = df[df['date'] >= start_date]
+    if end_date:
+        df = df[df['date'] <= end_date]
+    if company:
+        df = df[df['company'] == company]
+    if product:
+        df = df[df['product'] == product]
+    
+    # Update your graph based on the filtered data
+    figure = {
+        'data': [
+            # Your graph data here
+        ],
+        'layout': {
+            # Your graph layout here
+        }
+    }
+    return figure
+
+# Additional callbacks for other components
+# ...
 
 if __name__ == '__main__':
     app.run_server(debug=True)
