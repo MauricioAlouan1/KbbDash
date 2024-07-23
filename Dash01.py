@@ -109,7 +109,7 @@ def update_graphs(page):
         )
         margin_fig.update_traces(
             text=paginated_df['MARGVLR'].apply(lambda x: f"R$ {x:,.2f}"),
-            textposition='outside'
+            textposition='outside'  
         )
         margin_fig.update_layout(showlegend=False, yaxis={'categoryorder': 'total ascending'}, margin={'l': 200, 'r': 0, 't': 0, 'b': 0})
         

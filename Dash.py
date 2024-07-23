@@ -6,17 +6,36 @@ from Dash_overview import overview_layout
 from Dash_sheetview import sheetview_layout
 from Dash_salesmargin import salesmargin_layout
 
+# Global variable to store loaded data
+loaded_data = None
+
 # Function to load data
 def load_data():
+    global loaded_data
+    if loaded_data is not None:
+        return loaded_data
+
     path_options = [
-        '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/merged_data.xlsx',
-        '/Users/simon/Library/CloudStorage/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/merged_data.xlsx'
+        '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/clean/merged_data.xlsx',
+        '/Users/simon/Library/CloudStorage/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/clean/merged_data.xlsx'
     ]
     for path in path_options:
         if os.path.exists(path):
-            df_dict = pd.read_excel(path, sheet_name=None)  # Load all sheets into a dictionary
-            return df_dict
-    return None  # Return None if no path is found
+            data_path = path
+            break
+    else:
+        print("None of the specified directories exist.")
+        return None
+
+    # Read all sheets from the Excel file into a dictionary of dataframes
+    try:
+        loaded_data = pd.read_excel(data_path, sheet_name=None)
+        print(f"Loaded data from {data_path}")
+        print("Sheet names:", list(loaded_data.keys()))
+        return loaded_data
+    except Exception as e:
+        print(f"Error reading data: {e}")
+        return None
 
 # Initialize the app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
@@ -32,8 +51,9 @@ date_picker = dcc.DatePickerRange(
 company_filter = dcc.Dropdown(
     id='company-filter',
     options=[
+        {'label': 'Company K', 'value': 'K'},
         {'label': 'Company A', 'value': 'A'},
-        {'label': 'Company K', 'value': 'K'}
+        {'label': 'Company B', 'value': 'B'}
     ],
     multi=True,
     placeholder="Select Company"
@@ -71,6 +91,7 @@ app.layout = html.Div([
 # Callback to render tab content
 @app.callback(Output('tabs-content', 'children'),
               [Input('tabs', 'value')])
+
 def render_content(tab):
     if tab == 'overview':
         return overview_layout
@@ -105,6 +126,56 @@ def update_sheet_content(selected_sheet):
             style_table={'overflowX': 'auto'}
         )
     return html.Div(['Select a sheet to view its content.'])
+
+@app.callback(
+    Output('overview-content', 'children'),
+    [Input('date-picker', 'start_date'),
+     Input('date-picker', 'end_date'),
+     Input('company-filter', 'value'),
+     Input('marketplace-filter', 'value')]
+)
+def update_overview_totals(start_date, end_date, company, marketplace):
+    all_data = load_data()  # Load the dataset
+    if all_data is None:
+        return [html.H4("Error loading data.")]
+
+    df = all_data.get('MLK_Vendas', pd.DataFrame())  # Adjust the key as needed
+
+    if df.empty:
+        return [html.H4("No data available.")]
+
+    # Filter by date range
+    if start_date and end_date:
+        mask = (df['DATA DA VENDA'] >= start_date) & (df['DATA DA VENDA'] <= end_date)
+        df = df.loc[mask]
+
+    # Filter by company
+    if company:
+        df = df[df['EMPRESA'] == company]
+
+    # Filter by marketplace
+    if marketplace:
+        df = df[df['MP'] == marketplace]
+
+    # Calculate the summary statistics
+    total_sales = df['VLRTOTALPSKU'].sum()
+    total_profit = df['MARGVLR'].sum()
+    profit_to_sales_ratio = (total_profit / total_sales) * 100 if total_sales != 0 else 0
+    number_of_products = df['CODPP'].nunique()
+    number_of_returns = df[df['STATUS'] == 'DEVOLVIDO'].shape[0]
+    number_of_sold_products = df['SKU'].count()
+
+    # Create the summary display
+    summary_display = [
+        html.H4(f"Sales: R$ {total_sales:,.2f}"),
+        html.H4(f"Profit: R$ {total_profit:,.2f}"),
+        html.H4(f"Profit to Sales Ratio: {profit_to_sales_ratio:.2f}%"),
+        html.H4(f"Number of Products: {number_of_products}"),
+        html.H4(f"Number of Returns: {number_of_returns}"),
+        html.H4(f"Number of Sold Products: {number_of_sold_products}")
+    ]
+
+    return summary_display
 
 # Define callback for updating graphs with filters
 @app.callback(
