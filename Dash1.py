@@ -5,7 +5,7 @@ import pandas as pd
 from Dash_overview import overview_layout
 from Dash_sheetview import sheetview_layout
 from Dash_salesmargin import salesmargin_layout
-from Dash_shared import app
+from Dash_shared import app, load_data
 
 # Additional setup and layout code here
 

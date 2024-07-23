@@ -1,4 +1,5 @@
 # shared.py
+import os
 import pandas as pd
 from dash import Dash
 
