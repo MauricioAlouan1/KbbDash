@@ -1,7 +1,10 @@
+# Dash_salesmargin.py
 from dash import html, dcc, Input, Output
 import plotly.express as px
 import pandas as pd
-from dash import app, load_data
+from Dash_shared import load_data, app
+
+
 
 # Define the layout for the sales and margin view
 salesmargin_layout = html.Div([
