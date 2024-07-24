@@ -240,7 +240,7 @@ def merge_all_data(all_data):
             df['Imposto2'] = 0
             df['ImpostoT'] =  df['Imposto1'] + df['Imposto2']
 
-            cols_to_drop = ['CODPF_x', 'CODPF_y']
+            cols_to_drop = ['CODPF_x', 'CODPF_y', 'MLSTATUS']
             df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
 
         elif key == 'MLK_Vendas':
@@ -256,7 +256,7 @@ def merge_all_data(all_data):
             df['MARGVLR'] = df['REPASSE'] - df['ImpostoT'] - df['ECT'] - (1)
             df['MARGPCT'] = df['MARGVLR'] / df['VLRTOTALPSKU']
 
-            cols_to_drop = ['CODPF_x', 'CODPF_y']
+            cols_to_drop = ['CODPF_x', 'CODPF_y', 'MLSTATUS']
             df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
 
         # Update the dataframe in all_data
