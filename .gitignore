@@ -1,3 +1,4 @@
-# Byte-compiled / optimized / DLL files
+# Ignore Python bytecode files
+*.pyc
 __pycache__/
-*.py[cod]
+*.pyo
