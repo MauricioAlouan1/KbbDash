@@ -91,6 +91,7 @@ def process_MLK_Vendas(data):
     """Process MLK_Vendas files."""
     # Example processing: remove rows where 'N.º de venda' is NaN
     data = process_ml_data(data)
+    data = simplify_status(data)
     #data = data[data['N.º de venda'].notna()]
     return data
 
@@ -207,6 +208,21 @@ def process_ml_data(df):
 
     #df.drop(columns=['VlrTotalpPac', 'ReceitaEnvioTotPac', 'TarifaVendaTotPac', 'TarifaEnvioTotPac', 'CancelamentosTotPac', 'RepasseTotPac'])
     #df.drop(columns=['Unidades', 'URL de acompanhamento', 'Número de rastreamento', 'xx'], errors = 'ignore')
+    return df
+
+def simplify_status(df):
+    # Define the patterns and replacements
+    replacements = {
+        r"Pacote de \d+ produtos": "Pacote de produtos",
+        r"Devolvido no dia [\w\s]+": "Devolvido",
+        r"Entregue dia [\w\s]+": "Entregue",
+        r"Para enviar no dia [\w\s]+": "Para Enviar"
+    }
+    
+    # Apply the replacements
+    for pattern, replacement in replacements.items():
+        df['Status'] = df['Status'].str.replace(pattern, replacement, regex=True)
+    
     return df
 
 def excel_column_range(start, end):

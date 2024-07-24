@@ -1,5 +1,4 @@
 # Dash1.py (previously Dash.py)
-import os
 from dash import dcc, html, Input, Output, dash_table
 import pandas as pd
 from Dash_overview import overview_layout
