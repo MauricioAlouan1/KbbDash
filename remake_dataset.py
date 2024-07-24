@@ -174,6 +174,10 @@ def merge_all_data(all_data):
     all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "Empresa", default_value='erro')
     all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "MP", default_value='erro')
 
+    # OrderStatus Merge
+    all_data = merge_data(all_data, "MLA_Vendas", "STATUS", "T_MLStatus", "MLStatus", "OrderStatus", default_value='erro')
+    all_data = merge_data(all_data, "MLK_Vendas", "STATUS", "T_MLStatus", "MLStatus", "OrderStatus", default_value='erro')
+
     
     for key, df in all_data.items():
         if key == 'O_NFCI':
@@ -505,7 +509,8 @@ def main():
 
     # Load static data
     static_tables = ['T_CondPagto.xlsx', 'T_Fretes.xlsx', 'T_GruposCli.xlsx', 'T_MP.xlsx', 
-                     'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx','T_Vol.xlsx', 'T_ProdF.xlsx', 'T_ProdP.xlsx', 'T_Entradas.xlsx', 'T_FretesMP.xlsx']
+                     'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx','T_Vol.xlsx', 'T_ProdF.xlsx', 
+                     'T_ProdP.xlsx', 'T_Entradas.xlsx', 'T_FretesMP.xlsx', 'T_MLStatus.xlsx']
     static_data_dict = {table.replace('.xlsx', ''): load_static_data(static_dir, table) for table in static_tables}
     
     # Check static data shapes
