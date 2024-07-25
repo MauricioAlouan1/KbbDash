@@ -93,6 +93,8 @@ column_format_dict = {
     # Add dictionaries for other dataframes...
 }
 
+audit_client_names = ['ALWE', 'COMPROU CHEGOU', 'NEXT COMPRA']  # Add other clients as needed
+
 def rename_columns(all_data, column_rename_dict):
     for df_name, rename_dict in column_rename_dict.items():
         if df_name in all_data:
@@ -474,11 +476,30 @@ def excel_autofilters(output_path):
     workbook.save(output_path)
     print("Added auto-filters to all sheets")
 
-def main():
-    #base_dir = '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/'
-    #static_dir = os.path.join(base_dir, 'Tables')
-    #inventory_file_path = os.path.join(static_dir, 'R_EstoqComp.xlsx')  # Update to the correct path if needed
+# Define the audit function
+def perform_audit(df, client_name):
+    audit_columns = [
+        'CODPF',
+        'QTD',
+        'PRECO CALC',
+        'MERCVLR',
+        'ICMSST',
+        'IPI',
+        'TOTALNF',
+        'EMISS']
 
+    audit_df = df[df['NOMEF'] == client_name][audit_columns]  
+    return audit_df
+
+# Define the function to perform audits for all specified clients
+def perform_all_audits(all_data):
+    for client_name in audit_client_names:
+        audit_df = perform_audit(all_data['O_NFCI'], client_name)
+        all_data[f'Audit_{client_name}'] = audit_df
+        print(f"Performed audit for {client_name}")  # Debug print
+    return all_data
+
+def main():
     # Define file patterns for each data type
     file_patterns = {
         'O_NFCI': 'O_NFCI_{year_month}_clean.xlsx',
@@ -528,6 +549,10 @@ def main():
     # Merge all data with static data
     all_data = merge_all_data(all_data) 
 
+    # Perform audits for the specified clients
+    all_data = perform_all_audits(all_data)
+    print(f"Audit completed for clients: {', '.join(audit_client_names)}")
+
     # Save all data to one Excel file with multiple sheets
     output_path = os.path.join(base_dir, 'clean', 'merged_data.xlsx')
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
@@ -537,8 +562,8 @@ def main():
 
     print(f"All merged data saved to {output_path}")
 
-    excel_format(output_path, column_format_dict)
-    excel_autofilters(output_path)
+    #excel_format(output_path, column_format_dict)
+    #excel_autofilters(output_path)
 
 if __name__ == "__main__":
     main()

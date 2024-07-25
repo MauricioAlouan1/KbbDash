@@ -172,4 +172,4 @@ def create_main_graph(df):
     pass
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=True)  
