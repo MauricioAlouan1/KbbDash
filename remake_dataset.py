@@ -94,6 +94,7 @@ column_format_dict = {
 }
 
 audit_client_names = ['ALWE', 'COMPROU CHEGOU', 'NEXT COMPRA']  # Add other clients as needed
+invaudit_client_names = ['ALWE', 'COMPROU CHEGOU', 'NEXT COMPRA']  # Add other clients as needed
 
 def rename_columns(all_data, column_rename_dict):
     for df_name, rename_dict in column_rename_dict.items():
@@ -109,7 +110,8 @@ def rename_columns(all_data, column_rename_dict):
     return all_data
 
 def load_recent_data(base_dir, file_pattern, months=1):
-    end_date = datetime.now()
+    #end_date = datetime.now()
+    end_date = datetime(2024, 7, 15)
     start_date = end_date - timedelta(days=months * 30)  # Approximately three months
     frames = []
     for month_count in range(months + 1):  # Current month + last three months
@@ -146,7 +148,7 @@ def merge_all_data(all_data):
     compute_ML_ANOMES(all_data)
 
     # Merge O_NFCI with T_Remessas - REM
-    all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_Remessas", "NomeF", "REM_NF", default_value=0)
+    all_data = merge_data(all_data, "O_NFCI", "NOMEF", "T_Remessas", "NOMEF", "REM_NF", default_value=0)
 
     # Merge O_NFCI with T_Prodf - CODPP
     all_data = merge_data(all_data, "O_NFCI", "CodPF", "T_ProdF", "CodPF", "CODPP", default_value="xxx")
@@ -175,6 +177,7 @@ def merge_all_data(all_data):
     # Perform the merge (example merge, adjust as necessary)
     all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "Empresa", default_value='erro')
     all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "MP", default_value='erro')
+    all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "EmpresaF", default_value='erro')
 
     # OrderStatus Merge
     all_data = merge_data(all_data, "MLA_Vendas", "STATUS", "T_MLStatus", "MLStatus", "OrderStatus", default_value='erro')
@@ -499,6 +502,66 @@ def perform_all_audits(all_data):
         print(f"Performed audit for {client_name}")  # Debug print
     return all_data
 
+# Function to track inventory movements
+def track_inventory(sales_data, purchase_data):
+    inventory_movements = []
+    for index, row in sales_data.iterrows():
+        movement = {
+            'Date': row['DATA'],
+            'Invoice Number': None,
+            'Product Code': row['CODPF'],
+            'Quantity': -row['QTD'],
+            'CMV Esperado': None,  # Example column name for estimated cost
+            'CMV Realizado': None  # To be filled later
+        }
+        inventory_movements.append(movement)
+    
+    for index, row in purchase_data.iterrows():
+        movement = {
+            'Date': row['EMISS'],
+            'Invoice Number': row['NF'],
+            'Product Code': row['CODPF'],
+            'Quantity': row['QTD'],
+            'Preco': row['PRECO CALC'],  # Example column names for price and taxes
+            'IPI': row['IPI'],
+            'ST': row['ICMSST'],
+            'Preco Total': row['TOTALNF']
+        }
+        inventory_movements.append(movement)
+    
+    inventory_df = pd.DataFrame(inventory_movements)
+    inventory_df.sort_values(by='Date', inplace=True)
+    return inventory_df
+
+# Function to calculate realized cost
+def calculate_realized_cost(inventory_df):
+    inventory_df['CMV Realizado'] = inventory_df.groupby('Product Code').apply(lambda x: x['Preco Total'].cumsum().shift(fill_value=0)).reset_index(drop=True)
+    return inventory_df
+
+# Function to perform the inventory audit
+def perform_invaudit(o_nfci_df, l_lpi_df, client_name):
+    sales_data = l_lpi_df[l_lpi_df['EMPRESAF'] == client_name]
+    purchase_data = o_nfci_df[o_nfci_df['NOMEF'] == client_name]
+
+    inventory_df = track_inventory(sales_data, purchase_data)
+    inventory_df = calculate_realized_cost(inventory_df)
+    return inventory_df
+
+# Function to perform all inventory audits
+def perform_all_invaudits(all_data):
+    o_nfci_df = all_data['O_NFCI']
+    l_lpi_df = all_data['L_LPI']
+
+    invaudit_results = {}
+    for client in invaudit_client_names:
+        invaudit_results[client] = perform_invaudit(o_nfci_df, l_lpi_df, client)
+
+    # Add the audit results to the all_data dictionary
+    for client, df in invaudit_results.items():
+        all_data[f'InvAudit_{client}'] = df
+
+    return all_data
+
 def main():
     # Define file patterns for each data type
     file_patterns = {
@@ -552,6 +615,10 @@ def main():
     # Perform audits for the specified clients
     all_data = perform_all_audits(all_data)
     print(f"Audit completed for clients: {', '.join(audit_client_names)}")
+
+    # Perform innventory audits for the specified clients
+    all_data = perform_all_invaudits(all_data)
+    print(f"INVENTORY Audit completed for clients: {', '.join(audit_client_names)}")
 
     # Save all data to one Excel file with multiple sheets
     output_path = os.path.join(base_dir, 'clean', 'merged_data.xlsx')
