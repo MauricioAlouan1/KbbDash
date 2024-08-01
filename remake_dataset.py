@@ -505,6 +505,7 @@ def perform_all_audits(all_data):
 # Function to track inventory movements
 def track_inventory(sales_data, purchase_data):
     inventory_movements = []
+    
     for index, row in sales_data.iterrows():
         movement = {
             'Date': row['DATA'],
@@ -512,7 +513,9 @@ def track_inventory(sales_data, purchase_data):
             'Product Code': row['CODPF'],
             'Quantity': -row['QTD'],
             'CMV Esperado': None,  # Example column name for estimated cost
-            'CMV Realizado': None  # To be filled later
+            'CMV Realizado': None,  # To be filled later
+            'CMV Esperado Unit': None,  # Example column name for estimated unit cost
+            'CMV Realizado Unit': None  # To be filled later
         }
         inventory_movements.append(movement)
     
@@ -522,10 +525,12 @@ def track_inventory(sales_data, purchase_data):
             'Invoice Number': row['NF'],
             'Product Code': row['CODPF'],
             'Quantity': row['QTD'],
-            'Preco': row['PRECO CALC'],  # Example column names for price and taxes
+            'Merchandise Value': row['MERCVLR'],
             'IPI': row['IPI'],
             'ST': row['ICMSST'],
-            'Preco Total': row['TOTALNF']
+            'Total Value With Taxes': row['TOTALNF'],
+            'Custo Merc Unit': row['MERCVLR'] / row['QTD'],
+            'Custo Total Unit': row['TOTALNF'] / row['QTD']
         }
         inventory_movements.append(movement)
     
@@ -535,8 +540,72 @@ def track_inventory(sales_data, purchase_data):
 
 # Function to calculate realized cost
 def calculate_realized_cost(inventory_df):
-    inventory_df['CMV Realizado'] = inventory_df.groupby('Product Code').apply(lambda x: x['Preco Total'].cumsum().shift(fill_value=0)).reset_index(drop=True)
+    product_groups = inventory_df.groupby('Product Code')
+    
+    for product_code, group in product_groups:
+        cumulative_quantity = 0
+        realized_cost = 0
+        remaining_quantity = 0
+        cost_stack = []
+
+        for index, row in group.iterrows():
+            if row['Quantity'] > 0:
+                remaining_quantity += row['Quantity']
+                cost_stack.append({
+                    'quantity': row['Quantity'],
+                    'custo_total_unit': row['Custo Total Unit']
+                })
+            else:
+                quantity_needed = abs(row['Quantity'])
+                cmv_realizado = 0
+                cmv_realizado_unit = None
+                
+                # Allocate costs to sales
+                while quantity_needed > 0 and cost_stack:
+                    cost_entry = cost_stack[0]
+                    
+                    if cost_entry['quantity'] <= quantity_needed:
+                        cmv_realizado += cost_entry['quantity'] * cost_entry['custo_total_unit']
+                        quantity_needed -= cost_entry['quantity']
+                        cost_stack.pop(0)
+                    else:
+                        cmv_realizado += quantity_needed * cost_entry['custo_total_unit']
+                        cost_entry['quantity'] -= quantity_needed
+                        quantity_needed = 0
+
+                if cmv_realizado > 0:
+                    cmv_realizado_unit = cmv_realizado / abs(row['Quantity'])
+                
+                inventory_df.at[index, 'CMV Realizado'] = cmv_realizado
+                inventory_df.at[index, 'CMV Realizado Unit'] = cmv_realizado_unit
+
+        # Retroactively allocate costs to previous sales
+        for index, row in group.iterrows():
+            if pd.isna(row['CMV Realizado']) and cost_stack:
+                cmv_realizado = 0
+                cmv_realizado_unit = None
+                quantity_needed = abs(row['Quantity'])
+
+                while quantity_needed > 0 and cost_stack:
+                    cost_entry = cost_stack[0]
+                    
+                    if cost_entry['quantity'] <= quantity_needed:
+                        cmv_realizado += cost_entry['quantity'] * cost_entry['custo_total_unit']
+                        quantity_needed -= cost_entry['quantity']
+                        cost_stack.pop(0)
+                    else:
+                        cmv_realizado += quantity_needed * cost_entry['custo_total_unit']
+                        cost_entry['quantity'] -= quantity_needed
+                        quantity_needed = 0
+
+                if cmv_realizado > 0:
+                    cmv_realizado_unit = cmv_realizado / abs(row['Quantity'])
+                
+                inventory_df.at[index, 'CMV Realizado'] = cmv_realizado
+                inventory_df.at[index, 'CMV Realizado Unit'] = cmv_realizado_unit
+
     return inventory_df
+
 
 # Function to perform the inventory audit
 def perform_invaudit(o_nfci_df, l_lpi_df, client_name):
