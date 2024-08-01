@@ -503,110 +503,106 @@ def perform_all_audits(all_data):
     return all_data
 
 # Function to track inventory movements
+# Function to calculate realized cost
 def track_inventory(sales_data, purchase_data):
     inventory_movements = []
-    
+
+    # Process sales data
     for index, row in sales_data.iterrows():
         movement = {
-            'CV': 'V',
             'Date': row['DATA'],
             'Invoice Number': None,
             'Product Code': row['CODPF'],
             'Quantity': -row['QTD'],
-            'CMV Esperado': None,  # Example column name for estimated cost
-            'CMV Realizado': None,  # To be filled later
-            'CMV Esperado Unit': None,  # Example column name for estimated unit cost
-            'CMV Realizado Unit': None  # To be filled later
+            'CV': 'V',
+            'QTD E': row['QTD'],
+            'CMV Unit E': None,
+            'CMV Mov E': None,
+            'QTD R': None,
+            'CMV Unit R': None,
+            'CMV Mov R': None,
+            'NF Compra': None
         }
         inventory_movements.append(movement)
-    
+
+    # Process purchase data
     for index, row in purchase_data.iterrows():
         movement = {
-            'CV': 'C',
             'Date': row['EMISS'],
             'Invoice Number': row['NF'],
             'Product Code': row['CODPF'],
             'Quantity': row['QTD'],
-            'Merchandise Value': row['MERCVLR'],
-            'IPI': row['IPI'],
-            'ST': row['ICMSST'],
-            'Total Value With Taxes': row['TOTALNF'],
-            'Custo Merc Unit': row['MERCVLR'] / row['QTD'],
+            'CV': 'C',
+            'QTD E': None,
+            'CMV Unit E': row['PRECO CALC'],
+            'CMV Mov E': row['MERCVLR'],
+            'QTD R': None,
+            'CMV Unit R': None,
+            'CMV Mov R': None,
+            'NF Compra': row['NF'],
             'Custo Total Unit': row['TOTALNF'] / row['QTD']
         }
         inventory_movements.append(movement)
-    
+
     inventory_df = pd.DataFrame(inventory_movements)
     inventory_df.sort_values(by='Date', inplace=True)
     return inventory_df
 
-# Function to calculate realized cost
 def calculate_realized_cost(inventory_df):
-    product_groups = inventory_df.groupby('Product Code')
-    
-    for product_code, group in product_groups:
-        cumulative_quantity = 0
-        realized_cost = 0
-        remaining_quantity = 0
-        cost_stack = []
+    # Get all purchases (C) in ascending date order
+    purchase_data = inventory_df[inventory_df['CV'] == 'C'].sort_values(by='Date')
 
-        for index, row in group.iterrows():
-            if row['Quantity'] > 0:
-                remaining_quantity += row['Quantity']
-                cost_stack.append({
-                    'quantity': row['Quantity'],
-                    'custo_total_unit': row['Custo Total Unit']
-                })
-            else:
-                quantity_needed = abs(row['Quantity'])
-                cmv_realizado = 0
-                cmv_realizado_unit = None
-                
-                # Allocate costs to sales
-                while quantity_needed > 0 and cost_stack:
-                    cost_entry = cost_stack[0]
-                    
-                    if cost_entry['quantity'] <= quantity_needed:
-                        cmv_realizado += cost_entry['quantity'] * cost_entry['custo_total_unit']
-                        quantity_needed -= cost_entry['quantity']
-                        cost_stack.pop(0)
-                    else:
-                        cmv_realizado += quantity_needed * cost_entry['custo_total_unit']
-                        cost_entry['quantity'] -= quantity_needed
-                        quantity_needed = 0
+    # Create a list of purchases as objects with necessary details
+    purchase_list = []
+    for _, row in purchase_data.iterrows():
+        purchase_list.append({
+            'Product Code': row['Product Code'],
+            'Invoice Number': row['Invoice Number'],
+            'Quantity': row['Quantity'],
+            'Custo Total Unit': row['Custo Total Unit']
+        })
+    print("Purchase List:", purchase_list)  # Debug print
 
-                if cmv_realizado > 0:
-                    cmv_realizado_unit = cmv_realizado / abs(row['Quantity'])
-                
-                inventory_df.at[index, 'CMV Realizado'] = cmv_realizado
-                inventory_df.at[index, 'CMV Realizado Unit'] = cmv_realizado_unit
+    # Iterate through the sales (V) and populate the realized cost details
+    for index, row in inventory_df[inventory_df['CV'] == 'V'].iterrows():
+        quantity_needed = -row['Quantity']
+        for purchase in purchase_list:
+            if purchase['Product Code'] == row['Product Code'] and quantity_needed > 0:
+                if purchase['Quantity'] > 0:
+                    quantity_to_apply = min(purchase['Quantity'], quantity_needed)
 
-        # Retroactively allocate costs to previous sales
-        for index, row in group.iterrows():
-            if pd.isna(row['CMV Realizado']) and cost_stack:
-                cmv_realizado = 0
-                cmv_realizado_unit = None
-                quantity_needed = abs(row['Quantity'])
+                    # Update the realized cost details
+                    inventory_df.at[index, 'QTD R'] = quantity_to_apply
+                    inventory_df.at[index, 'CMV Unit R'] = purchase['Custo Total Unit']
+                    inventory_df.at[index, 'CMV Mov R'] = quantity_to_apply * purchase['Custo Total Unit']
+                    inventory_df.at[index, 'NF Compra'] = purchase['Invoice Number']
 
-                while quantity_needed > 0 and cost_stack:
-                    cost_entry = cost_stack[0]
-                    
-                    if cost_entry['quantity'] <= quantity_needed:
-                        cmv_realizado += cost_entry['quantity'] * cost_entry['custo_total_unit']
-                        quantity_needed -= cost_entry['quantity']
-                        cost_stack.pop(0)
-                    else:
-                        cmv_realizado += quantity_needed * cost_entry['custo_total_unit']
-                        cost_entry['quantity'] -= quantity_needed
-                        quantity_needed = 0
+                    # Update the purchase details
+                    purchase['Quantity'] -= quantity_to_apply
+                    quantity_needed -= quantity_to_apply
 
-                if cmv_realizado > 0:
-                    cmv_realizado_unit = cmv_realizado / abs(row['Quantity'])
-                
-                inventory_df.at[index, 'CMV Realizado'] = cmv_realizado
-                inventory_df.at[index, 'CMV Realizado Unit'] = cmv_realizado_unit
+        # If there's still quantity needed, populate the expected cost details
+        if quantity_needed > 0:
+            inventory_df.at[index, 'QTD E'] = quantity_needed
+            if row['CMV Unit E'] is not None:
+                inventory_df.at[index, 'CMV Mov E'] = quantity_needed * row['CMV Unit E']
 
+    # Add remaining purchase quantities back to the corresponding purchase rows
+    for purchase in purchase_list:
+        if purchase['Quantity'] > 0:
+            purchase_indices = inventory_df[
+                (inventory_df['Product Code'] == purchase['Product Code']) &
+                (inventory_df['Invoice Number'] == purchase['Invoice Number'])
+            ].index
+            if not purchase_indices.empty:
+                purchase_index = purchase_indices[0]
+                inventory_df.at[purchase_index, 'QTD E'] = purchase['Quantity']
+                inventory_df.at[purchase_index, 'CMV Unit E'] = purchase['Custo Total Unit']
+                inventory_df.at[purchase_index, 'CMV Mov E'] = purchase['Quantity'] * purchase['Custo Total Unit']
+
+    print(inventory_df)  # Debug print
     return inventory_df
+
 
 
 # Function to perform the inventory audit
