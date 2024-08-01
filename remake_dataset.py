@@ -508,6 +508,7 @@ def track_inventory(sales_data, purchase_data):
     
     for index, row in sales_data.iterrows():
         movement = {
+            'CV': 'V',
             'Date': row['DATA'],
             'Invoice Number': None,
             'Product Code': row['CODPF'],
@@ -521,6 +522,7 @@ def track_inventory(sales_data, purchase_data):
     
     for index, row in purchase_data.iterrows():
         movement = {
+            'CV': 'C',
             'Date': row['EMISS'],
             'Invoice Number': row['NF'],
             'Product Code': row['CODPF'],
