@@ -3,6 +3,9 @@ import os
 import openpyxl
 import pandas as pd
 import numpy as np
+import fitz  # PyMuPDF
+import PyPDF2  # or any other PDF library you're using
+
 
 # Define the potential base directories
 path_options = [
@@ -20,6 +23,15 @@ else:
     base_dir = None  # Or set a default path if appropriate
 
 print("Base directory set to:", base_dir)
+
+def load_and_clean_pdfdata(filepath, processor):
+    # Function to load and clean data from a PDF file
+    with fitz.open(filepath) as pdf:
+        text = ""
+        for page in pdf:
+            text += page.get_text()
+    data = processor(text)
+    return data
 
 def find_header_row(filepath, header_name):
     """Utility function to find the header row index using pandas."""
@@ -94,6 +106,112 @@ def process_MLK_Vendas(data):
     data = simplify_status(data)
     #data = data[data['N.º de venda'].notna()]
     return data
+
+def process_pdf(file_path):
+    try:
+        with open(file_path, 'rb') as pdf_file:
+            reader = PyPDF2.PdfReader(pdf_file)
+            extracted_text = []
+            
+            for page in range(len(reader.pages)):
+                page_text = reader.pages[page].extract_text()
+                print(f"Extracted text from page {page + 1}:\n{page_text[:500]}...")  # Debug print (first 500 characters)
+                extracted_text.append(page_text)
+                
+            structured_data = []
+            
+            for text in extracted_text:
+                # Split text into lines
+                lines = text.splitlines()
+                print(f"Lines extracted: {len(lines)}")  # Debug print
+                
+                for line in lines:
+                    # Attempt to split by multiple spaces
+                    columns = re.split(r'\s{2,}', line.strip())
+                    
+                    # If the line wasn't split well, try splitting by single spaces
+                    if len(columns) == 1:
+                        columns = line.split()
+                    
+                    print(f"Columns found: {columns}")  # Debug print
+                    
+                    if len(columns) > 1:  # Ensure it's not a blank line or a line with only one column
+                        structured_data.append(columns)
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(structured_data)
+            print(f"DataFrame created with shape: {df.shape}")  # Debug print
+            
+            return df
+                        
+    except Exception as e:
+        print(f"Failed to process {file_path}: {e}")
+
+
+def processpdf_CK_Bal(filepath):
+    # Open the PDF file
+    doc = fitz.open(filepath)
+    
+    text = ""
+    for page in doc:
+        text += page.get_text()
+
+    # Split the text into lines
+    lines = text.split('\n')
+
+    # Initialize lists to store extracted data
+    codes = []
+    descriptions = []
+    classifications = []
+    current_balances = []
+    previous_balances = []
+    debits = []
+    credits = []
+
+    # Start extracting data
+    for line in lines:
+        parts = line.split()
+        
+        if len(parts) > 6:  # Only consider lines with the expected number of parts
+            try:
+                # Extract the parts of the line into their respective lists
+                code = parts[0]
+                classification = parts[1]
+                description = " ".join(parts[2:-4])
+                current_balance = parts[-4]
+                previous_balance = parts[-3]
+                debit = parts[-2]
+                credit = parts[-1]
+
+                codes.append(code)
+                descriptions.append(description)
+                classifications.append(classification)
+                current_balances.append(current_balance)
+                previous_balances.append(previous_balance)
+                debits.append(debit)
+                credits.append(credit)
+            except IndexError:
+                continue  # Skip lines that don't match the expected format
+
+    # Create a DataFrame from the extracted data
+    df = pd.DataFrame({
+        'Code': codes,
+        'Description': descriptions,
+        'Classification': classifications,
+        'Current Balance': current_balances,
+        'Previous Balance': previous_balances,
+        'Debit': debits,
+        'Credit': credits
+    })
+
+    # Convert numeric columns to appropriate data types
+    df['Current Balance'] = pd.to_numeric(df['Current Balance'].str.replace(',', '').str.replace('D', '').str.replace('C', ''), errors='coerce')
+    df['Previous Balance'] = pd.to_numeric(df['Previous Balance'].str.replace(',', '').str.replace('D', '').str.replace('C', ''), errors='coerce')
+    df['Debit'] = pd.to_numeric(df['Debit'].str.replace(',', ''), errors='coerce')
+    df['Credit'] = pd.to_numeric(df['Credit'].str.replace(',', ''), errors='coerce')
+    print(df.head())
+    return df
+
 
 def rename_repeated_columns(df):
     """Rename repeated columns by appending a number to each repeated column name."""
@@ -298,6 +416,11 @@ def check_and_process_files():
         'MLK_Vendas': (process_MLK_Vendas, "N.º de venda", True),  # Enable hyperlink extraction for MLK_Vendas
         'MLA_Vendas': (process_MLK_Vendas, "N.º de venda", True)  # New entry, same process as MLK_Vendas
     }
+
+    pdf_processing_map = {
+        'CK_Bal': processpdf_CK_Bal,  # Add other PDF processors here as needed
+    }
+
     for subdir, dirs, files in os.walk(raw_dir):
         for file in files:
             if file.endswith('.xlsx') and not file.startswith('~$'):
@@ -315,6 +438,24 @@ def check_and_process_files():
                                 save_cleaned_data(data, clean_filepath)
                             except Exception as e:
                                 print(f"Error processing {file}: {e}")
+                        else:
+                            print(f"Skipped {file}, already processed.")
+            elif file.endswith('.pdf'):
+                for key, processor in pdf_processing_map.items():
+                    if key in file:
+                        raw_filepath = os.path.join(subdir, file)
+                        clean_subdir = os.path.join(clean_dir, os.path.basename(subdir))
+                        clean_filepath = os.path.join(clean_subdir, file.replace('.pdf', '_clean.xlsx'))
+
+                        if not os.path.exists(clean_filepath):
+                            print(f"Processing PDF {file}...")
+                            try:                                
+                                data = process_pdf(raw_filepath)
+                                # Assuming your `save_cleaned_data` can also handle text or other formats for PDFs
+                                save_cleaned_data(data, clean_filepath)
+                            except Exception as e:
+                                print(f"Error processing")
+                                #print(f"Error processing {file}: {e}")
                         else:
                             print(f"Skipped {file}, already processed.")
 
