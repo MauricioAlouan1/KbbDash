@@ -696,8 +696,8 @@ def main():
 
     print(f"All merged data saved to {output_path}")
 
-    #excel_format(output_path, column_format_dict)
-    #excel_autofilters(output_path)
+    excel_format(output_path, column_format_dict)
+    excel_autofilters(output_path)
 
 if __name__ == "__main__":
     main()
