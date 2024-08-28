@@ -28,13 +28,6 @@ def find_header_row(filepath, header_name):
             return i
     raise ValueError(f"Header {header_name} not found in the file.")
 
-def process_O_NFSI(data):
-    if 'Operação' in data.columns:
-        data['Operação'] = data['Operação'].ffill()  # Forward fill to handle empty cells
-    # Remove row where the specific column has 'Total geral'
-    data = data[data['Operação'] != 'Total geral']  # Adjust 'Operação' to your actual column name
-    return data
-
 def process_O_NFCI(data):
     """Inspect and process O_NFCI files: Remove rows where 'Situação' is effectively blank."""
     if not data.empty:
@@ -290,7 +283,6 @@ def check_and_process_files():
     clean_dir = os.path.join(base_dir, 'clean')
 
     processing_map = {
-        'O_NFSI': (process_O_NFSI, "Operação", False),
         'O_NFCI': (process_O_NFCI, "Operação", False),
         'O_CC': (process_O_CC, "Situação", False),
         'O_CtasAPagar': (process_O_CtasAPagar, "Minha Empresa (Nome Fantasia)", False),
