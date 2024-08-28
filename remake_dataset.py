@@ -40,11 +40,7 @@ column_rename_dict = {
         'Estado': 'UF'
         # Add other columns that need renaming for O_NFCI
     },
-    'B_Estoq': {
-        'Código': 'CODPF'
-        # Add other columns that need renaming for B_Estoq
-    },
-    'L_LPI': {
+     'L_LPI': {
         'Preço Com Desconto': 'VLRVENDA',
         'SKU': 'CODPF',
         'Vendas': 'QTD'
@@ -76,10 +72,6 @@ column_format_dict = {
         'MARGVLR': '#,##0.00',
         'MARGPCT': '0.00%',
         # Add other formats for O_NFCI
-    },
-    'B_Estoq': {
-        'CODPF': '@',
-        # Add other formats for B_Estoq
     },
     'L_LPI':{
         'VLRVENDA': '#,##0.00',        
@@ -170,8 +162,11 @@ def merge_all_data(all_data):
 
     # Merge UF with T_Fretes for FretePCT
     all_data = merge_data(all_data, "O_NFCI", "UF", "T_Fretes", "UF", "FRETEPCT", default_value=0)
+    # Set FRETEPCT = 0 where G1 = "DROP" or "ALWE" in O_NFCI table
+    if 'O_NFCI' in all_data:
+        all_data['O_NFCI'].loc[all_data['O_NFCI']['G1'].isin(['DROP', 'ALWE']), 'FRETEPCT'] = 0
 
-    # Merge NomeF with T_Fretes for VerbaPct
+    # Merge NomeF with T_Verbas for VerbaPct
     all_data = merge_data(all_data, "O_NFCI", "NOMEF", "T_Verbas", "NomeF", "VERBAPCT", default_value=0)
 
     # Perform the merge (example merge, adjust as necessary)
@@ -215,8 +210,9 @@ def merge_all_data(all_data):
         elif key == 'L_LPI':
             # Add the 'Valido' column directly
             df.drop(columns=['PREÇO TOTAL', 'DESCONTO ITEM', 'DESCONTO TOTAL'], inplace=True)
-            df['Valido'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
-            df['ECT'] = df['ECU'] * df['QTD'] * df['Valido']
+            df['VALIDO'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
+            df['KAB'] = df.apply(lambda row: 1 if row['Valido'] == 1 and row['EMPRESA'] in ['K', 'A', 'B'] else 0, axis=1)
+            df['ECTK'] = df['ECU'] * df['QTD'] * df['KAB']
 
             # Add the 'TipoAnuncio' column directly
             if 'MLK_Vendas' in all_data:
@@ -241,7 +237,7 @@ def merge_all_data(all_data):
                 df.drop(columns=['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO'], inplace=True)
 
         elif key == 'MLA_Vendas':
-            # Add the 'Valido' column directly
+            # Add the 'VALIDO' column directly
             df['Imposto1'] = df['VLRTOTALPSKU']*(0.11)
             df['Imposto2'] = 0
             df['ImpostoT'] =  df['Imposto1'] + df['Imposto2']
@@ -251,15 +247,15 @@ def merge_all_data(all_data):
 
         elif key == 'MLK_Vendas':
             # Create column ECT (ECU x QTD)
-            df['ECT'] = df['ECU'] * df['QTD']
+            df['ECTK'] = df['ECU'] * df['QTD']
 
-            # Add the 'Valido' column directly
+            # Add the 'Impostos' columns directly
             df['Imposto1'] = df['VLRTOTALPSKU']*(0.0925)
             df['Imposto2'] = df['VLRTOTALPSKU']*(0.18)
             df['ImpostoT'] =  df['Imposto1'] + df['Imposto2']
 
             # Create column MargCVlr
-            df['MARGVLR'] = df['REPASSE'] - df['ImpostoT'] - df['ECT'] - (1)
+            df['MARGVLR'] = df['REPASSE'] - df['ImpostoT'] - df['ECTK'] - (1)
             df['MARGPCT'] = df['MARGVLR'] / df['VLRTOTALPSKU']
 
             cols_to_drop = ['CODPF_x', 'CODPF_y', 'MLSTATUS']
@@ -634,15 +630,12 @@ def main():
     # Define file patterns for each data type
     file_patterns = {
         'O_NFCI': 'O_NFCI_{year_month}_clean.xlsx',
-        'O_NFSI': 'O_NFSI_{year_month}_clean.xlsx',
-        'B_Estoq': 'B_Estoq_{year_month}_clean.xlsx',
         'L_LPI': 'L_LPI_{year_month}_clean.xlsx',
         'MLA_Vendas': 'MLA_Vendas_{year_month}_clean.xlsx',
         'MLK_Vendas': 'MLK_Vendas_{year_month}_clean.xlsx',
         'O_CC': 'O_CC_{year_month}_clean.xlsx',
         'O_CtasAPagar': 'O_CtasAPagar_{year_month}_clean.xlsx',
         'O_CtasARec': 'O_CtasARec_{year_month}_clean.xlsx',
-        'O_Estoq': 'O_Estoq_{year_month}_clean.xlsx',
     }
 
     all_data = {}
