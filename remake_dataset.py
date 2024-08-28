@@ -76,6 +76,7 @@ column_format_dict = {
     'L_LPI':{
         'VLRVENDA': '#,##0.00',        
         'ECU': '#,##0.00',
+        'ECTK': '#,##0.00',
     },
     'MLK_Vendas':{
         'MARGVLR': '#,##0.00',        
@@ -211,7 +212,7 @@ def merge_all_data(all_data):
             # Add the 'Valido' column directly
             df.drop(columns=['PREÇO TOTAL', 'DESCONTO ITEM', 'DESCONTO TOTAL'], inplace=True)
             df['VALIDO'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
-            df['KAB'] = df.apply(lambda row: 1 if row['Valido'] == 1 and row['EMPRESA'] in ['K', 'A', 'B'] else 0, axis=1)
+            df['KAB'] = df.apply(lambda row: 1 if row['VALIDO'] == 1 and row['EMPRESA'] in ['K', 'A', 'B'] else 0, axis=1)
             df['ECTK'] = df['ECU'] * df['QTD'] * df['KAB']
 
             # Add the 'TipoAnuncio' column directly
