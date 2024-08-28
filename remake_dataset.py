@@ -214,8 +214,9 @@ def merge_all_data(all_data):
 
         elif key == 'L_LPI':
             # Add the 'Valido' column directly
+            df.drop(columns=['PREÇO TOTAL', 'DESCONTO ITEM', 'DESCONTO TOTAL'], inplace=True)
             df['Valido'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
-            df['ECT'] = df['ECU'] * df['QTD']
+            df['ECT'] = df['ECU'] * df['QTD'] * df['Valido']
 
             # Add the 'TipoAnuncio' column directly
             if 'MLK_Vendas' in all_data:

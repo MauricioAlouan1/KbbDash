@@ -76,12 +76,15 @@ def process_B_Estoq(data):
     return data
 
 def process_L_LPI(data):
+    cols_to_delete = ['Preço', 'Preço Total', 'Desconto Pedido', 'Desconto Item', 
+                      'Desconto Total', 'Desconto Item Seller', 'Comissão', 'Frete Comprador', 
+                      'Acrescimo', 'Recebimento', 'Custo', 'Custo Total', 'Imposto', 
+                      'Lucro Bruto', 'Margem de Lucro']  # Make sure the column names match exactly
+    data.drop(columns=[col for col in cols_to_delete if col in data.columns], inplace=True)
+
     """Process L_LPI files: convert formatted currency in specific columns to float."""
-    currency_columns = ['Preço', 'Preço Total', 'Preço Com Desconto', 'Desconto Total',
-                        'Desconto Pedido', 'Desconto Item', 'Desconto Total',
-                        'Desconto Pedido Seller', 'Desconto Item Seller', 'Comissão',
-                        'Frete Seller', 'Frete Comprador', 'Acrescimo', 'Recebimento', 'Custo',
-                        'Custo Total', 'Imposto', 'Lucro Bruto']  # Update if more columns are involved
+    currency_columns = ['Preço Com Desconto', 'Desconto Pedido Seller',
+                        'Frete Seller']  # Update if more columns are involved
     for col in currency_columns:
         if col in data.columns:
             data[col] = data[col].apply(convert_currency_to_float)
@@ -198,12 +201,12 @@ def process_ml_data(df):
     df['SKU'] = df['SKU'].replace('', pd.NA)
     df = propagate_package_info(df)
     df = df.dropna(subset=['SKU'])
-
+    
     # Drop the calculation columns
     cols_to_drop = ['VlrTotalpPac', 'ReceitaEnvioTotPac', 'TarifaVendaTotPac', 'TarifaEnvioTotPac', 'CancelamentosTotPac', 'RepasseTotPac']
     cols_to_drop.extend(['Receita por produtos (BRL)', 'Receita por envio (BRL)', 'Tarifa de venda e impostos',	'Tarifas de envio',	'Cancelamentos e reembolsos (BRL)',	'Total (BRL)'])
     cols_to_drop.extend(['Unidades01', 'Unidades02', 'URL de acompanhamento', 'URL de acompanhamento01', 'Número de rastreamento', 'País', 'Tipo de contribuinte',	'Inscrição estadual'])
-    cols_to_drop.extend(['Forma de entrega', 'Forma de entrega01', 'Data a caminho', 'Data a caminho01', 'Motorista', 'Motorista01'])
+    cols_to_drop.extend(['Forma de entrega01', 'Data a caminho', 'Data a caminho01', 'Motorista', 'Motorista01'])
     df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
 
     #df.drop(columns=['VlrTotalpPac', 'ReceitaEnvioTotPac', 'TarifaVendaTotPac', 'TarifaEnvioTotPac', 'CancelamentosTotPac', 'RepasseTotPac'])
