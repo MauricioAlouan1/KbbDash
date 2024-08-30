@@ -191,31 +191,32 @@ def merge_all_data(all_data):
             df['B'] = df.apply(lambda row: 1 if row['OP'] == 'REMESSA DE PRODUTO' and row['C'] == 1 else 0, axis=1)
             
             # Create column ECT (ECU x QTD)
-            df['ECT'] = df['ECU'] * df['QTD']
+            df['ECT'] = df['ECU'] * df['QTD'] * df['C']
  
             # Create column COMVLR (VLRMERC x COMPCT)
-            df['COMISSVLR'] = df['MERCVLR'] * df['COMISSPCT']
+            df['COMISSVLR'] = df['MERCVLR'] * df['COMISSPCT'] * df['C']
 
-            # Create column FreteVLR (FretePCT x TotalNF)
-            df['FRETEVLR'] = df['FRETEPCT'] * df['TOTALNF']
+            # Create column FreteVLR (FretePCT x TotalNF)            
+            #df['FRETEVLR'] = df['FRETEPCT'] * df['TOTALNF'] * df['C']
+            df['FRETEVLR'] = df.apply(lambda row: max(row['FRETEPCT'] * row['TOTALNF'] * row['C'], row['FRETEPCT'] * row['ECT'] * row['C'] * 2), axis=1)
 
             # Create column VerbaVLR (VerbaPCT x TotalNF)
-            df['VERBAVLR'] = df['VERBAPCT'] * df['TOTALNF']
+            df['VERBAVLR'] = df['VERBAPCT'] * df['TOTALNF'] * df['C']
 
             # Create column MargCVlr
-            df['MARGVLR'] = df['MERCVLR'] * (1 - 0.0925) - df['ICMS'] - df['VERBAVLR'] - df['FRETEVLR'] - df['COMISSVLR'] - df['ECT']
+            df['MARGVLR'] = df['C'] * ( df['MERCVLR'] * (1 - 0.0925) - df['ICMS'] ) - df['VERBAVLR'] - df['FRETEVLR'] - df['COMISSVLR'] - df['ECT']
 
             # Create column VerbaVLR (VerbaPCT x TotalNF)
             df['MARGPCT'] = df['MARGVLR'] / df['MERCVLR']
 
         elif key == 'L_LPI':
             # Add the 'Valido' column directly
-            df.drop(columns=['PREÇO TOTAL', 'DESCONTO ITEM', 'DESCONTO TOTAL'], inplace=True)
+            df.drop(columns=['PREÇO', 'PREÇO TOTAL', 'DESCONTO ITEM', 'DESCONTO TOTAL'], inplace=True)
             df['VALIDO'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
             df['KAB'] = df.apply(lambda row: 1 if row['VALIDO'] == 1 and row['EMPRESA'] in ['K', 'A', 'B'] else 0, axis=1)
             df['ECTK'] = df['ECU'] * df['QTD'] * df['KAB']
 
-            # Add the 'TipoAnuncio' column directly
+            # Add the 'TipoAnuncio' column directly from 'MLK_Vendas'
             if 'MLK_Vendas' in all_data:
                 df = df.merge(
                     all_data['MLK_Vendas'][['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO']],
@@ -236,6 +237,32 @@ def merge_all_data(all_data):
                 )
                 df['TipoAnuncio'] = df.apply(lambda row: row['TIPO DE ANÚNCIO'] if row['EMPRESA'] == 'A' and row['MP'] == 'ML' else row['TipoAnuncio'], axis=1)
                 df.drop(columns=['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO'], inplace=True)
+
+            # Add colum Compctmp (Comissão pct por Marketplace)
+            if 'T_RegrasMP' in all_data:
+                df = df.merge(
+                    all_data['T_RegrasMP'][['MPX', 'TARMP']],
+                    left_on='MP',
+                    right_on='MPX',
+                    how='left'
+                )
+                df['Compctmp'] = df['TARMP']
+                df.drop(columns=['MPX', 'TARMP'], inplace=True)
+
+            # Add colum Compctml (Comissão pct pro ML Classico/Premium)
+                df = df.merge(
+                    all_data['T_RegrasMP'][['MPX', 'TARMP']],
+                    left_on='TipoAnuncio',
+                    right_on='MPX',
+                    how='left'
+                )
+                df['Compctml'] = df['TARMP']
+                df.drop(columns=['MPX', 'TARMP'], inplace=True)
+
+            # Create the ComPct column based on the condition
+            df['ComPct'] = df.apply(lambda row: row['Compctml'] if pd.notnull(row['Compctml']) else row['Compctmp'], axis=1)
+            df['Com'] = df['VLRVENDA'] * df['ComPct'] * df['KAB']
+
 
         elif key == 'MLA_Vendas':
             # Add the 'VALIDO' column directly
