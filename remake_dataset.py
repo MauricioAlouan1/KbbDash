@@ -1,4 +1,5 @@
 import pandas as pd
+from pandas.tseries.offsets import MonthEnd
 import os
 from datetime import datetime, timedelta
 from openpyxl import load_workbook
@@ -179,6 +180,10 @@ def merge_all_data(all_data):
     all_data = merge_data(all_data, "MLA_Vendas", "STATUS", "T_MLStatus", "MLStatus", "OrderStatus", default_value='erro')
     all_data = merge_data(all_data, "MLK_Vendas", "STATUS", "T_MLStatus", "MLStatus", "OrderStatus", default_value='erro')
 
+    # Ctas a Pagar e Receber
+    all_data = merge_data(all_data, "O_CtasAPagar", "CATEGORIA", "T_CtasAPagarClass", "Categoria", "GrupoCtasAPagar", default_value='erro')
+    all_data = merge_data(all_data, "O_CtasARec", "CATEGORIA", "T_CtasAPagarClass", "Categoria", "GrupoCtasAPagar", default_value='erro')
+
     
     for key, df in all_data.items():
         if key == 'O_NFCI':
@@ -263,7 +268,6 @@ def merge_all_data(all_data):
             df['ComPct'] = df.apply(lambda row: row['Compctml'] if pd.notnull(row['Compctml']) else row['Compctmp'], axis=1)
             df['Com'] = df['VLRVENDA'] * df['ComPct'] * df['KAB']
 
-
         elif key == 'MLA_Vendas':
             # Add the 'VALIDO' column directly
             df['Imposto1'] = df['VLRTOTALPSKU']*(0.11)
@@ -288,6 +292,25 @@ def merge_all_data(all_data):
 
             cols_to_drop = ['CODPF_x', 'CODPF_y', 'MLSTATUS']
             df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
+
+        elif key == 'O_CtasARec':
+            # Step 2: Create the 'DATA BASE' column which is the last day of the month
+            df['DATA BASE'] = pd.to_datetime(df['ANOMES'], format='%y%m') + MonthEnd(0)
+            # Step 3: Calculate 'DIAS ATRASO'
+            df['DIAS ATRASO'] = (df['DATA BASE'] - df['VENCIMENTO']).dt.days
+            # Step 4: Apply condition to set DIAS ATRASO to 0 if VENCIMENTO is greater than DATA BASE
+            df['DIAS ATRASO'] = df['DIAS ATRASO'].apply(lambda x: max(0, x))
+            # Step 5: Classify 'DIAS ATRASO' using the classification table from all_data['T_CtasARecClass']
+            df_ctas_a_rec_class = all_data['T_CtasARecClass']
+
+            # Merge based on the 'DIAS ATRASO' column and classification table
+            df = pd.merge(df, df_ctas_a_rec_class, how='left', left_on='DIAS ATRASO', right_on='DeXDias')
+        
+            # Apply the range condition for 'DIAS ATRASO' to determine classification
+            df['Classificacao'] = df.apply(lambda row: row['Status Atraso'] if row['DeXDias'] <= row['DIAS ATRASO'] <= row['AteXDias'] else None, axis=1)
+        
+            # Filter out rows where the classification was not within the proper range
+            df = df.dropna(subset=['Classificacao'])
 
         # Update the dataframe in all_data
         all_data[key] = df
@@ -683,7 +706,7 @@ def main():
     # Load static data
     static_tables = ['T_CondPagto.xlsx', 'T_Fretes.xlsx', 'T_GruposCli.xlsx', 'T_MP.xlsx', 
                      'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx','T_Vol.xlsx', 'T_ProdF.xlsx', 
-                     'T_ProdP.xlsx', 'T_Entradas.xlsx', 'T_FretesMP.xlsx', 'T_MLStatus.xlsx']
+                     'T_ProdP.xlsx', 'T_Entradas.xlsx', 'T_FretesMP.xlsx', 'T_MLStatus.xlsx', 'T_CtasAPagarClass.xlsx']
     static_data_dict = {table.replace('.xlsx', ''): load_static_data(static_dir, table) for table in static_tables}
     
     # Check static data shapes
