@@ -2,6 +2,7 @@ import pandas as pd
 from pandas.tseries.offsets import MonthEnd
 import os
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 from openpyxl import load_workbook
 from openpyxl.styles import NamedStyle, Font, PatternFill, Alignment
 import re
@@ -103,13 +104,24 @@ def rename_columns(all_data, column_rename_dict):
             all_data[df_name] = df
     return all_data
 
-def load_recent_data(base_dir, file_pattern, months=1):
-    #end_date = datetime.now()
-    end_date = datetime(2024, 7, 15)
-    start_date = end_date - timedelta(days=months * 30)  # Approximately three months
+def load_recent_data(base_dir, file_pattern, start_date=None, end_date=None):
+    # Set default end_date if not provided
+    if end_date is None:
+        #end_date = datetime.now()
+        end_date = datetime(2024, 8, 31)
+    
+    # Set default start_date if not provided
+    if start_date is None:
+        #start_date = end_date - timedelta(days=30)  # Default to last month
+        start_date = datetime(2024, 1, 1)
+
+    # Calculate the number of months between start_date and end_date
+    months = (end_date.year - start_date.year) * 12 + end_date.month - start_date.month
+
     frames = []
-    for month_count in range(months + 1):  # Current month + last three months
-        year_month = (start_date + timedelta(days=30 * month_count)).strftime('%Y_%m')
+    current_date = start_date
+    while current_date <= end_date:
+        year_month = current_date.strftime('%Y_%m')
         file_path = os.path.join(base_dir, 'clean', year_month, file_pattern.format(year_month=year_month))
         if os.path.exists(file_path):
             df = pd.read_excel(file_path)
@@ -117,6 +129,9 @@ def load_recent_data(base_dir, file_pattern, months=1):
             print(f"Loaded {file_path} with shape: {df.shape}")  # Debug print
         else:
             print(f"File not found: {file_path}")  # Debug print
+        # Increment by one month using relativedelta
+        current_date += relativedelta(months=1)
+
     return pd.concat(frames) if frames else pd.DataFrame()
 
 def load_static_data(static_dir, filename):
