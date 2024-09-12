@@ -215,8 +215,9 @@ def merge_all_data(all_data):
             df['MARGPCT'] = df['MARGVLR'] / df['MERCVLR']
 
         elif key == 'L_LPI':
+            cols_to_drop = ['PREÇO', 'PREÇO TOTAL', 'DESCONTO ITEM', 'DESCONTO TOTAL']
+            df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
             # Add the 'Valido' column directly
-            df.drop(columns=['PREÇO', 'PREÇO TOTAL', 'DESCONTO ITEM', 'DESCONTO TOTAL'], inplace=True)
             df['VALIDO'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
             df['KAB'] = df.apply(lambda row: 1 if row['VALIDO'] == 1 and row['EMPRESA'] in ['K', 'A', 'B'] else 0, axis=1)
             df['ECTK'] = df['ECU'] * df['QTD'] * df['KAB']
@@ -304,13 +305,13 @@ def merge_all_data(all_data):
             df_ctas_a_rec_class = all_data['T_CtasARecClass']
 
             # Merge based on the 'DIAS ATRASO' column and classification table
-            df = pd.merge(df, df_ctas_a_rec_class, how='left', left_on='DIAS ATRASO', right_on='DeXDias')
+            df = pd.merge(df, df_ctas_a_rec_class, how='left', left_on='DIAS ATRASO', right_on='DEXDIAS')
         
             # Apply the range condition for 'DIAS ATRASO' to determine classification
-            df['Classificacao'] = df.apply(lambda row: row['Status Atraso'] if row['DeXDias'] <= row['DIAS ATRASO'] <= row['AteXDias'] else None, axis=1)
+            df['CLASSIFICACAO'] = df.apply(lambda row: row['STATUS ATRASO'] if row['DEXDIAS'] <= row['DIAS ATRASO'] <= row['DEXDIAS'] else None, axis=1)
         
             # Filter out rows where the classification was not within the proper range
-            df = df.dropna(subset=['Classificacao'])
+            df = df.dropna(subset=['CLASSIFICACAO'])
 
         # Update the dataframe in all_data
         all_data[key] = df
@@ -706,7 +707,7 @@ def main():
     # Load static data
     static_tables = ['T_CondPagto.xlsx', 'T_Fretes.xlsx', 'T_GruposCli.xlsx', 'T_MP.xlsx', 
                      'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx','T_Vol.xlsx', 'T_ProdF.xlsx', 
-                     'T_ProdP.xlsx', 'T_Entradas.xlsx', 'T_FretesMP.xlsx', 'T_MLStatus.xlsx', 'T_CtasAPagarClass.xlsx']
+                     'T_ProdP.xlsx', 'T_Entradas.xlsx', 'T_FretesMP.xlsx', 'T_MLStatus.xlsx', 'T_CtasAPagarClass.xlsx', 'T_CtasARecClass.xlsx']
     static_data_dict = {table.replace('.xlsx', ''): load_static_data(static_dir, table) for table in static_tables}
     
     # Check static data shapes
