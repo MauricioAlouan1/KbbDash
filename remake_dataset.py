@@ -722,7 +722,8 @@ def main():
     # Load static data
     static_tables = ['T_CondPagto.xlsx', 'T_Fretes.xlsx', 'T_GruposCli.xlsx', 'T_MP.xlsx', 
                      'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx','T_Vol.xlsx', 'T_ProdF.xlsx', 
-                     'T_ProdP.xlsx', 'T_Entradas.xlsx', 'T_FretesMP.xlsx', 'T_MLStatus.xlsx', 'T_CtasAPagarClass.xlsx', 'T_CtasARecClass.xlsx']
+                     'T_ProdP.xlsx', 'T_Entradas.xlsx', 'T_FretesMP.xlsx', 'T_MLStatus.xlsx', 'T_CtasAPagarClass.xlsx',
+                     'T_CtasARecClass.xlsx', 'T_CCClass.xlsx']
     static_data_dict = {table.replace('.xlsx', ''): load_static_data(static_dir, table) for table in static_tables}
     
     # Check static data shapes
