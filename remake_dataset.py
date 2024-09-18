@@ -155,6 +155,7 @@ def merge_all_data(all_data):
     compute_NFCI_ANOMES(all_data)
     compute_LPI_ANOMES(all_data)
     compute_ML_ANOMES(all_data)
+    compute_CC_ANOMES(all_data)
 
     # Merge O_NFCI with T_Remessas - REM
     all_data = merge_data(all_data, "O_NFCI", "NOMEF", "T_Remessas", "NOMEF", "REM_NF", default_value=0)
@@ -454,6 +455,16 @@ def compute_LPI_ANOMES(all_data):
     for key, df in all_data.items():
         # Add the ANOMES column to L_LPI
         if key == 'L_LPI' and 'DATA' in df.columns:
+            df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')  # Ensure the date is parsed correctly
+            df['ANOMES'] = df['DATA'].dt.strftime('%y%m')  # Format date as YYMM
+            print(f"Added ANOMES column to {key}")
+        all_data[key] = df
+    return all_data
+
+def compute_CC_ANOMES(all_data):
+    for key, df in all_data.items():
+        # Add the ANOMES column to L_LPI
+        if key == 'O_CC' and 'DATA' in df.columns:
             df['DATA'] = pd.to_datetime(df['DATA'], errors='coerce')  # Ensure the date is parsed correctly
             df['ANOMES'] = df['DATA'].dt.strftime('%y%m')  # Format date as YYMM
             print(f"Added ANOMES column to {key}")
