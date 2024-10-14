@@ -68,6 +68,12 @@ def process_B_Estoq(data):
         data = data.iloc[:-1]
     return data
 
+def process_T_EstTrans(data):
+    """Process O_Estoq files: adapt this function to meet specific requirements."""
+    # Example: Remove rows where 'Código do Produto' is empty
+    data = data[data['CodProd'].notna()]
+    return data
+    
 def process_L_LPI(data):
     cols_to_delete = ['Preço', 'Preço Total', 'Desconto Pedido', 'Desconto Item', 
                       'Desconto Total', 'Desconto Item Seller', 'Comissão', 'Frete Comprador', 
@@ -291,7 +297,8 @@ def check_and_process_files():
         'L_LPI': (process_L_LPI, "Data", False),
         'O_Estoq': (process_O_Estoq, "Código do Produto", False),
         'MLK_Vendas': (process_MLK_Vendas, "N.º de venda", True),  # Enable hyperlink extraction for MLK_Vendas
-        'MLA_Vendas': (process_MLK_Vendas, "N.º de venda", True)  # New entry, same process as MLK_Vendas
+        'MLA_Vendas': (process_MLK_Vendas, "N.º de venda", True),  # New entry, same process as MLK_Vendas
+        'T_EstTrans': (process_T_EstTrans, "CodProd", False)
     }
     for subdir, dirs, files in os.walk(raw_dir):
         for file in files:
@@ -311,7 +318,8 @@ def check_and_process_files():
                             except Exception as e:
                                 print(f"Error processing {file}: {e}")
                         else:
-                            print(f"Skipped {file}, already processed.")
+                            pass
+                            # print(f"Skipped {file}, already processed.")
 
 def extract_hyperlinks_data(filepath, header_name):
     """Extract data and create a new column for hyperlinks for a specific header."""
