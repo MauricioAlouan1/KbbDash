@@ -1,3 +1,22 @@
+"""
+This script, `remake_dataset.py`, is part of the KBB MF data pipeline for processing financial and inventory datasets. 
+Its primary objectives include:
+1. Setting up directories for dynamic and static data sources.
+2. Importing essential libraries such as pandas and openpyxl for data manipulation and file handling.
+3. Processing and merging datasets, including:
+   - Combining dynamic data files with static lookup tables stored in the "Tables" directory.
+   - Cleaning and transforming data for reporting and dashboard creation.
+4. Leveraging utility functions for tasks like locating directories, managing dates, and formatting Excel outputs.
+
+Prerequisites:
+- Ensure that the directories specified in `path_options` exist and contain the necessary files.
+- Verify that the "Tables" directory holds the required static tables for lookup and merging operations.
+
+This script is integral to maintaining data accuracy and efficiency in the reporting workflow.
+"""
+
+
+
 import pandas as pd
 from pandas.tseries.offsets import MonthEnd
 import os
