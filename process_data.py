@@ -1,3 +1,9 @@
+"""
+Process data in excel files from RAW folder to CLEAN folder.
+Only process data that has ot been processed yet.
+To re-process, delete file from CLEAN Folder.
+"""
+
 import re
 import os
 import openpyxl
