@@ -294,6 +294,7 @@ def check_and_process_files():
         'O_CtasAPagar': (process_O_CtasAPagar, "Minha Empresa (Nome Fantasia)", False),
         'O_CtasARec': (process_O_CtasAPagar, "Minha Empresa (Nome Fantasia)", False),
         'B_Estoq': (process_B_Estoq, "Código", False),
+        'B_EFull': (process_B_Estoq, "Código", False),
         'L_LPI': (process_L_LPI, "Data", False),
         'O_Estoq': (process_O_Estoq, "Código do Produto", False),
         'MLK_Vendas': (process_MLK_Vendas, "N.º de venda", True),  # Enable hyperlink extraction for MLK_Vendas
