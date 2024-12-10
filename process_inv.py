@@ -23,6 +23,11 @@ This script is integral to maintaining the accuracy and efficiency of inventory 
 
 import os
 import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.styles import NamedStyle
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.styles import Font, PatternFill
+from openpyxl import Workbook, load_workbook
 import sys
 
 # Define the base directory as before, now adding the /clean part
@@ -40,7 +45,7 @@ else:
 
 # Define the date range variables
 start_year = 2024
-start_month = 11
+start_month = 1
 end_year = 2024
 end_month = 11
 
@@ -154,21 +159,21 @@ def lookup_cu_values(inventory_df):
         inventory_df.rename(columns={'Quantidade': 'Quantidade_Inv', 'Codigo': 'Codigo_Inv'}, inplace=True)
 
         prodf_df.rename(columns={'CodPF': 'CodPF_Prod', 'CodPP': 'CodPP_Prod'}, inplace=True)
-        print("---- Renamed Cols:")
-        print("inventory_df")
-        print(inventory_df)
-        print(f"inventory_df shape: {inventory_df.shape}")
-        print("---- Renamed Cols:")
-        print("prodf_df")
-        print(prodf_df)
-        print(f"prodf_df shape: {prodf_df.shape}")
+        #print("---- Renamed Cols:")
+        #print("inventory_df")
+        #print(inventory_df)
+        #print(f"inventory_df shape: {inventory_df.shape}")
+        #print("---- Renamed Cols:")
+        #print("prodf_df")
+        #print(prodf_df)
+        #print(f"prodf_df shape: {prodf_df.shape}")
 
         # Match 'Codigo_Inv' to T_ProdF['CodPF_Prod'] to get T_ProdF['CodPP_Prod'] as 'CodPP'
         inventory_df = pd.merge(inventory_df, prodf_df[['CodPF_Prod', 'CodPP_Prod']], left_on='Codigo_Inv', right_on='CodPF_Prod', how='left')
-        print("---- Matched 1 Cols:")
-        print("inventory_df")
-        print(inventory_df)
-        print(f"inventory_df shape: {inventory_df.shape}")
+        #print("---- Matched 1 Cols:")
+        #print("inventory_df")
+        #print(inventory_df)
+        #print(f"inventory_df shape: {inventory_df.shape}")
 
         # Create UCP by matching CodPP_Prod to T_Entradas[Pai], but exclude rows where Pai is blank
         filtered_entradas_with_pai = filtered_entradas[filtered_entradas['Pai'].notna() & (filtered_entradas['Pai'] != '')]
@@ -242,8 +247,110 @@ def process_all_months():
 
             # Step 3: Save the resulting dataframe to a new Excel file
             output_filepath = os.path.join(base_dir, 'clean', f'combined_inventory_{year}_{month:02d}.xlsx')
-            final_df.to_excel(output_filepath, index=False)
+            final_df.to_excel(output_filepath, index=False, sheet_name='Data')
             print(f"Saved combined inventory data for {year}-{month:02d} to {output_filepath}")
+            format_and_add_pivot(output_filepath, final_df)
+            print(f"Added Formating and Pivots for {year}-{month:02d} to {output_filepath}")
+
+
+# Format and add pivot tables using openpyxl
+def format_and_add_pivot(output_filepath, df):
+    # Load the workbook
+    wb = load_workbook(output_filepath)
+    ws = wb['Data']
+    
+    # Apply number format to specified columns
+    number_format = '#,##0.00'
+    columns_to_format = ['UCP', 'UCF', 'UCU', 'UCT']
+    # Add autofilter to the pivot table
+    ws.auto_filter.ref = ws.dimensions
+
+    for col in columns_to_format:
+        if col in df.columns:
+            col_idx = df.columns.get_loc(col) + 1  # Adjust for Excel's 1-based indexing
+            for row in range(2, len(df) + 2):  # Start from the second row (excluding header)
+                cell = ws.cell(row=row, column=col_idx)
+                cell.number_format = number_format
+    
+    # Create a pivot table on a new sheet
+    pivot_table = df.pivot_table(
+       index='Codigo_Inv',
+        columns='Local',
+        values='Quantidade_Inv',
+        aggfunc='sum',
+        fill_value=0
+    )
+############################################
+    # Ensure total column is correct
+    pivot_table['Total'] = pivot_table.sum(axis=1)
+
+    # Add a total cost column
+    total_cost = df.groupby('Codigo_Inv')['UCT'].sum()
+    pivot_table['Total Cost'] = total_cost
+
+    # Add a unit cost column
+    pivot_table['Unit Cost'] = pivot_table['Total Cost'] / pivot_table['Total']
+
+    # Validate totals
+    original_total_cost = df['UCT'].sum()
+    pivot_total_cost = pivot_table['Total Cost'].sum()
+
+    print(f"Original Total Cost: {original_total_cost}")
+    print(f"Pivot Table Total Cost: {pivot_total_cost}")
+
+    # Check for mismatched rows
+    unmatched_rows = df[~df['Codigo_Inv'].isin(pivot_table.index)]
+    if not unmatched_rows.empty:
+        print("Unmatched rows found:")
+        print(unmatched_rows)
+    else:
+        print('### No unmatched rows ###')
+        
+############################################
+
+    # Reset the index for better readability
+    pivot_table = pivot_table.reset_index()
+
+    # Add the pivot table to a new sheet
+    pivot_sheet_name = 'PT01'
+    if pivot_sheet_name not in wb.sheetnames:
+        wb.create_sheet(title=pivot_sheet_name)
+    pivot_ws = wb[pivot_sheet_name]
+    
+    # Write headers
+    for col_idx, header in enumerate(pivot_table.columns, start=1):
+        pivot_ws.cell(row=1, column=col_idx, value=header)
+
+    # Write the pivot table data
+    for r_idx, row in enumerate(pivot_table.itertuples(index=False), start=2):
+        for c_idx, value in enumerate(row, start=1):
+            pivot_ws.cell(row=r_idx, column=c_idx, value=value)
+    
+    # Add totals row at the bottom
+    totals_row_idx = len(pivot_table) + 2
+    pivot_ws.cell(row=totals_row_idx, column=1, value="Grand Total").font = Font(bold=True)
+    for col_idx, col_name in enumerate(pivot_table.columns[1:], start=2):  # Skip 'CodPF_Prod'
+        total_value = pivot_table[col_name].sum()
+        cell = pivot_ws.cell(row=totals_row_idx, column=col_idx, value=total_value)
+        cell.font = Font(bold=True)
+        if col_name in ['Total Cost', 'Unit Cost']:
+            cell.number_format = number_format
+
+    # Apply formatting to the last 3 columns (bold + light gray fill)
+    gray_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+    for col_name in ['Total', 'Total Cost', 'Unit Cost']:
+        col_idx = pivot_table.columns.get_loc(col_name) + 1
+        for row in range(2, totals_row_idx + 1):  # Include totals row
+            cell = pivot_ws.cell(row=row, column=col_idx)
+            cell.font = Font(bold=True)
+            cell.fill = gray_fill
+            cell.number_format = number_format
+
+    # Add autofilter to the pivot table
+    pivot_ws.auto_filter.ref = pivot_ws.dimensions
+
+    # Save the workbook
+    wb.save(output_filepath)
 
 
 if __name__ == "__main__":
