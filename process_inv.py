@@ -245,16 +245,17 @@ def process_all_months():
             if final_df is None:
                 continue
 
+            # Add AnoMes
+            final_df['AnoMes'] = (year % 100) * 100 + month
             # Step 3: Save the resulting dataframe to a new Excel file
-            output_filepath = os.path.join(base_dir, 'clean', f'combined_inventory_{year}_{month:02d}.xlsx')
+            output_filepath = os.path.join(base_dir, 'clean',f'{year}_{month:02d}', f'R_Estoq_fdm_{year}_{month:02d}.xlsx')
             final_df.to_excel(output_filepath, index=False, sheet_name='Data')
             print(f"Saved combined inventory data for {year}-{month:02d} to {output_filepath}")
-            format_and_add_pivot(output_filepath, final_df)
+            format_and_add_pivot(output_filepath, final_df, year,month)
             print(f"Added Formating and Pivots for {year}-{month:02d} to {output_filepath}")
 
-
 # Format and add pivot tables using openpyxl
-def format_and_add_pivot(output_filepath, df):
+def format_and_add_pivot(output_filepath, df, year, month):
     # Load the workbook
     wb = load_workbook(output_filepath)
     ws = wb['Data']
@@ -290,6 +291,8 @@ def format_and_add_pivot(output_filepath, df):
 
     # Add a unit cost column
     pivot_table['Unit Cost'] = pivot_table['Total Cost'] / pivot_table['Total']
+    # Add AnoMes
+    pivot_table['AnoMes'] = (year % 100) * 100 + month
 
     # Validate totals
     original_total_cost = df['UCT'].sum()
