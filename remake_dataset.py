@@ -127,12 +127,12 @@ def load_recent_data(base_dir, file_pattern, start_date=None, end_date=None):
     # Set default end_date if not provided
     if end_date is None:
         #end_date = datetime.now()
-        end_date = datetime(2024, 10, 31)
+        end_date = datetime(2024, 11, 30)
         
     # Set default start_date if not provided
     if start_date is None:
         #start_date = end_date - timedelta(days=30)  # Default to last month
-        start_date = datetime(2024, 1, 1)
+        start_date = datetime(2024, 11, 1)
 
     # Calculate the number of months between start_date and end_date
     months = (end_date.year - start_date.year) * 12 + end_date.month - start_date.month
