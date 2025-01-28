@@ -127,7 +127,7 @@ def load_recent_data(base_dir, file_pattern, start_date=None, end_date=None):
     # Set default end_date if not provided
     if end_date is None:
         #end_date = datetime.now()
-        end_date = datetime(2024, 11, 30)
+        end_date = datetime(2024, 12, 31)
         
     # Set default start_date if not provided
     if start_date is None:
