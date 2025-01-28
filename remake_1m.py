@@ -25,9 +25,9 @@ from openpyxl import load_workbook
 from openpyxl.styles import NamedStyle, Font, PatternFill, Alignment
 import re
 
-#Global
-ano_x = 2024
-mes_x = 11
+#Define Global Values
+start_date=None
+end_date=None
 
 # Define the potential base directories
 path_options = [
@@ -71,7 +71,8 @@ column_rename_dict = {
     },
     'MLK_Vendas' : {
         'PREÇO UNITÁRIO DE VENDA DO ANÚNCIO (BRL)': 'PRECOUNIT',
-        'Quantidade' : 'QTD'
+        'Quantidade' : 'QTD',
+        'Tipo de anúncio' : 'TipoAnuncio'
     }
     # Add dictionaries for other dataframes...
 }
@@ -123,21 +124,37 @@ def rename_columns(all_data, column_rename_dict):
             # Debug print to verify columns after renaming
             print(f"Renamed columns in {df_name}: {rename_dict}")
             print(f"Columns in {df_name}: {df.columns.tolist()}")
+            print(f"Data types in {df_name}: {df.dtypes.tolist()}")
             all_data[df_name] = df
     return all_data
 
-def load_recent_data(base_dir, file_pattern, ds_year = ano_x, ds_month = mes_x):
- 
+def load_recent_data(base_dir, file_pattern, start_date=None, end_date=None):
+    # Set default end_date if not provided
+    if end_date is None:
+        #end_date = datetime.now()
+        end_date = datetime(2024, 12, 31)
+        
+    # Set default start_date if not provided
+    if start_date is None:
+        #start_date = end_date - timedelta(days=30)  # Default to last month
+        start_date = datetime(2024, 11, 1)
+
+    # Calculate the number of months between start_date and end_date
+    months = (end_date.year - start_date.year) * 12 + end_date.month - start_date.month
+
     frames = []
-    current_date = datetime(ds_year, ds_month, 1)
-    year_month = current_date.strftime('%Y_%m')
-    file_path = os.path.join(base_dir, 'clean', year_month, file_pattern.format(year_month=year_month))
-    if os.path.exists(file_path):
-        df = pd.read_excel(file_path)
-        frames.append(df)
-        print(f"Loaded {file_path} with shape: {df.shape}")  # Debug print
-    else:
-        print(f"File not found: {file_path}")  # Debug print
+    current_date = start_date
+    while current_date <= end_date:
+        year_month = current_date.strftime('%Y_%m')
+        file_path = os.path.join(base_dir, 'clean', year_month, file_pattern.format(year_month=year_month))
+        if os.path.exists(file_path):
+            df = pd.read_excel(file_path)
+            frames.append(df)
+            print(f"Loaded {file_path} with shape: {df.shape}")  # Debug print
+        else:
+            print(f"File not found: {file_path}")  # Debug print
+        # Increment by one month using relativedelta
+        current_date += relativedelta(months=1)
 
     return pd.concat(frames) if frames else pd.DataFrame()
 
@@ -205,7 +222,7 @@ def merge_all_data(all_data):
 
     # Ctas a Pagar e Receber
     all_data = merge_data(all_data, "O_CtasAPagar", "CATEGORIA", "T_CtasAPagarClass", "Categoria", "GrupoCtasAPagar", default_value='erro')
-    #all_data = merge_data(all_data, "O_CtasARec", "CATEGORIA", "T_CtasARecClass", "Categoria", "GrupoCtasAPagar", default_value='erro')
+    all_data = merge_data(all_data, "O_CtasARec", "CATEGORIA", "T_CtasAPagarClass", "Categoria", "GrupoCtasAPagar", default_value='erro')
 
     # CC
     all_data = merge_data(all_data, "O_CC", "CATEGORIA", "T_CCCats", "CC_Categoria Omie", "CC_Cat SG", default_value='erro')
@@ -252,7 +269,6 @@ def merge_all_data(all_data):
 
             # Add the 'TipoAnuncio' column directly from 'MLK_Vendas'
             if 'MLK_Vendas' in all_data:
-                print_table_head(all_data, "MLK_Vendas")
                 df = df.merge(
                     all_data['MLK_Vendas'][['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO']],
                     left_on='CÓDIGO PEDIDO',
@@ -263,7 +279,9 @@ def merge_all_data(all_data):
                 df.drop(columns=['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO'], inplace=True)
 
             # Add the 'TipoAnuncio' column for 'A' and lookup in 'MLA_Vendas'
+            print("BBBBBBB")
             if 'MLA_Vendas' in all_data:
+                all_data['MLA_Vendas']['TipoAnuncio'] = all_data['MLA_Vendas']['TipoAnuncio'].astype(str)            
                 df = df.merge(
                     all_data['MLA_Vendas'][['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO']],
                     left_on='CÓDIGO PEDIDO',
@@ -285,6 +303,7 @@ def merge_all_data(all_data):
                 df.drop(columns=['MPX', 'TARMP'], inplace=True)
 
             # Add colum Compctml (Comissão pct pro ML Classico/Premium)
+                print("CCCCCCC")
                 df = df.merge(
                     all_data['T_RegrasMP'][['MPX', 'TARMP']],
                     left_on='TipoAnuncio',
@@ -333,20 +352,14 @@ def merge_all_data(all_data):
             # Step 5: Classify 'DIAS ATRASO' using the classification table from all_data['T_CtasARecClass']
             df_ctas_a_rec_class = all_data['T_CtasARecClass']
 
-             # Step 6: Perform the range-based classification
-            def classify_dias_atraso(row):
-                # Find the classification based on DIAS ATRASO falling within DEXDIAS and ATEXDIAS range
-                match = df_ctas_a_rec_class[
-                    (df_ctas_a_rec_class['DEXDIAS'] <= row['DIAS ATRASO']) &
-                    (row['DIAS ATRASO'] <= df_ctas_a_rec_class['ATEXDIAS'])
-                ]
-                return match['STATUS ATRASO'].iloc[0] if not match.empty else None
-            
-            # Apply the classification function to each row
-            df['CLASSIFICACAO'] = df.apply(classify_dias_atraso, axis=1)
+            # Merge based on the 'DIAS ATRASO' column and classification table
+            df = pd.merge(df, df_ctas_a_rec_class, how='left', left_on='DIAS ATRASO', right_on='DEXDIAS')
+        
+            # Apply the range condition for 'DIAS ATRASO' to determine classification
+            df['CLASSIFICACAO'] = df.apply(lambda row: row['STATUS ATRASO'] if row['DEXDIAS'] <= row['DIAS ATRASO'] <= row['DEXDIAS'] else None, axis=1)
         
             # Filter out rows where the classification was not within the proper range
-            #df = df.dropna(subset=['CLASSIFICACAO'])
+            df = df.dropna(subset=['CLASSIFICACAO'])
 
         # Update the dataframe in all_data
         all_data[key] = df
@@ -521,6 +534,7 @@ def print_all_tables_and_columns(all_data):
         print(f"Table: {table_name}")
         print("Columns:", df.columns.tolist())
         print("-" * 50)
+
 def print_table_and_columns(all_data, table_name):
     if table_name in all_data:
         print(f"Table: {table_name}")
@@ -528,16 +542,6 @@ def print_table_and_columns(all_data, table_name):
         print("-" * 50)
     else:
         print(f"Table '{table_name}' not found in the dataset.")
-def print_table_head(all_data, table_name):
-    """
-    Print the column names and the first 10 rows of a DataFrame.
-
-    Parameters:
-    df (pandas.DataFrame): The DataFrame to print.
-    """
-    print("Columns:", all_data[table_name].columns.tolist())
-    print("\nTop 10 Rows:")
-    print(all_data[table_name].head(10))
 
 def excel_format(output_path, column_format_dict):
     print("Formatting all sheets")
@@ -745,9 +749,8 @@ def main():
     }
 
     all_data = {}
-
     for key, pattern in file_patterns.items():
-        recent_data = load_recent_data(base_dir, pattern)
+        recent_data = load_recent_data(base_dir, pattern, start_date, end_date)
         print(f"{key} data shape: {recent_data.shape}")  # Debug print
 
         # Ensure 'N.º de venda' is treated as string if the column exists
@@ -789,9 +792,7 @@ def main():
     print(f"INVENTORY Audit completed for clients: {', '.join(audit_client_names)}")
 
     # Save all data to one Excel file with multiple sheets
-    current_date = datetime(ano_x, mes_x, 1)
-    year_month = current_date.strftime('%Y_%m')
-    output_path = os.path.join(base_dir, 'clean', year_month, f'R_Resumo_{year_month}.xlsx')
+    output_path = os.path.join(base_dir, 'clean', 'merged_data.xlsx')
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         for key, df in all_data.items():
             df.to_excel(writer, sheet_name=key, index=False)
@@ -802,5 +803,23 @@ def main():
     excel_format(output_path, column_format_dict)
     excel_autofilters(output_path)
 
+# Main script with date input
 if __name__ == "__main__":
+    user_input = input("Enter the year and month to process (yyyy_mm) or press Enter to process all data: ").strip()
+
+    if user_input:
+        try:
+            year, month = map(int, user_input.split('_'))
+            start_date = datetime(year, month, 1)
+            end_date = start_date + MonthEnd(0)
+            print(f"Processing data for specified month: {start_date.strftime('%Y-%m')}...")
+        except ValueError:
+            print("Invalid input format. Please use yyyy_mm.")
+            exit(1)
+    else:
+        print("No date specified. Processing data using default date range...")
+
+    # Call the processing function with the (possibly updated) global variables
+    print(f"Processing all data from {start_date} to {end_date}...")
+    # Original processing logic goes here
     main()
