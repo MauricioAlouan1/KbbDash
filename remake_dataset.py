@@ -27,7 +27,7 @@ import re
 
 #Global
 ano_x = 2024
-mes_x = 11
+mes_x = 2
 
 # Define the potential base directories
 path_options = [
@@ -118,11 +118,11 @@ def rename_columns(all_data, column_rename_dict):
         if df_name in all_data:
             df = all_data[df_name]
             # Debug print to verify columns before renaming
-            print(f"Before rename:\nTable: {df_name}\nColumns: {df.columns.tolist()}")
+            #print(f"Before rename:\nTable: {df_name}\nColumns: {df.columns.tolist()}")
             df.rename(columns=rename_dict, inplace=True)
             # Debug print to verify columns after renaming
-            print(f"Renamed columns in {df_name}: {rename_dict}")
-            print(f"Columns in {df_name}: {df.columns.tolist()}")
+            #print(f"Renamed columns in {df_name}: {rename_dict}")
+            #print(f"Columns in {df_name}: {df.columns.tolist()}")
             all_data[df_name] = df
     return all_data
 
@@ -135,7 +135,7 @@ def load_recent_data(base_dir, file_pattern, ds_year = ano_x, ds_month = mes_x):
     if os.path.exists(file_path):
         df = pd.read_excel(file_path)
         frames.append(df)
-        print(f"Loaded {file_path} with shape: {df.shape}")  # Debug print
+        #print(f"Loaded {file_path} with shape: {df.shape}")  # Debug print
     else:
         print(f"File not found: {file_path}")  # Debug print
 
@@ -248,6 +248,11 @@ def merge_all_data(all_data):
             # Add the 'Valido' column directly
             df['VALIDO'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
             df['KAB'] = df.apply(lambda row: 1 if row['VALIDO'] == 1 and row['EMPRESA'] in ['K', 'A', 'B'] else 0, axis=1)
+            print("#### DEBUG  ####")
+            print("Unique values in EMPRESA:", df['EMPRESA'].unique())
+            print("Unique values in VALIDO:", df['VALIDO'].unique())
+            print("Unique values in KAB:", df['KAB'].unique())
+
             df['ECTK'] = df['ECU'] * df['QTD'] * df['KAB']
 
             # Add the 'TipoAnuncio' column directly from 'MLK_Vendas'
@@ -285,9 +290,15 @@ def merge_all_data(all_data):
                 df.drop(columns=['MPX', 'TARMP'], inplace=True)
 
             # Add colum Compctml (Comissão pct pro ML Classico/Premium)
+                # PROBLEM IS HERE
+                print("######################")
+                print("######################")
+                print("######################")
+                print("######################")
+
                 df = df.merge(
                     all_data['T_RegrasMP'][['MPX', 'TARMP']],
-                    left_on='TipoAnuncio',
+                    left_on='MP',
                     right_on='MPX',
                     how='left'
                 )
@@ -518,13 +529,13 @@ def load_inventory_data(file_path):
 
 def print_all_tables_and_columns(all_data):
     for table_name, df in all_data.items():
-        print(f"Table: {table_name}")
-        print("Columns:", df.columns.tolist())
+        #print(f"Table: {table_name}")
+        #print("Columns:", df.columns.tolist())
         print("-" * 50)
 def print_table_and_columns(all_data, table_name):
     if table_name in all_data:
-        print(f"Table: {table_name}")
-        print("Columns:", all_data[table_name].columns.tolist())
+        #print(f"Table: {table_name}")
+        #print("Columns:", all_data[table_name].columns.tolist())
         print("-" * 50)
     else:
         print(f"Table '{table_name}' not found in the dataset.")
@@ -535,9 +546,9 @@ def print_table_head(all_data, table_name):
     Parameters:
     df (pandas.DataFrame): The DataFrame to print.
     """
-    print("Columns:", all_data[table_name].columns.tolist())
+    #print("Columns:", all_data[table_name].columns.tolist())
     print("\nTop 10 Rows:")
-    print(all_data[table_name].head(10))
+    #print(all_data[table_name].head(10))
 
 def excel_format(output_path, column_format_dict):
     print("Formatting all sheets")
