@@ -75,7 +75,6 @@ column_rename_dict = {
     }
     # Add dictionaries for other dataframes...
 }
-
 column_format_dict = {
     'O_NFCI': {
         'EMISS': 'DD-MMM-YY',
@@ -99,8 +98,11 @@ column_format_dict = {
     },
     'L_LPI':{
         'VLRVENDA': '#,##0.00',        
-        'ECU': '#,##0.00',
+        'ECUK': '#,##0.00',
         'ECTK': '#,##0.00',
+        'ComissPctMp': '0.0%',
+        'ComissVlr': '#,##0.00',
+        'FreteFixoVlr': '#,##0.00',
     },
     'MLK_Vendas':{
         'MARGVLR': '#,##0.00',        
@@ -109,6 +111,21 @@ column_format_dict = {
 
     # Add dictionaries for other dataframes...
 }
+
+rows_todrop = {
+    'O_NFCI': {
+        'C': 0,
+    }
+}
+
+cols_todrop = {
+    'O_NFCI': {
+        'PROJETO': 'd',
+        'C': 'd',
+    }
+}
+
+
 
 audit_client_names = ['ALWE', 'COMPROU CHEGOU', 'NEXT COMPRA']  # Add other clients as needed
 invaudit_client_names = ['ALWE', 'COMPROU CHEGOU', 'NEXT COMPRA']  # Add other clients as needed
@@ -152,6 +169,37 @@ def standardize_text_case(df):
             df[col] = df[col].str.upper()
     return df
 
+def clean_dataframes(all_data):
+    """
+    Drops specified rows and columns from each table in all_data based on global variables rows_todrop and cols_todrop.
+    
+    Parameters:
+    - all_data (dict): Dictionary containing all datasets.
+
+    Returns:
+    - all_data (dict): Updated dictionary with rows and columns removed as per defined rules.
+    """
+    global rows_todrop, cols_todrop
+
+    for key, df in all_data.items():
+        # Drop rows based on conditions in rows_todrop
+        if key in rows_todrop:
+            for col, value in rows_todrop[key].items():
+                if col in df.columns:
+                    df = df[df[col] != value]  # Keep rows where column is NOT equal to the specified value
+                    print(f"Dropped rows in {key} where {col} = {value}")
+
+        # Drop columns based on conditions in cols_todrop
+        if key in cols_todrop:
+            cols_to_remove = [col for col in cols_todrop[key].keys() if col in df.columns]
+            df = df.drop(columns=cols_to_remove, errors='ignore')
+            print(f"Dropped columns {cols_to_remove} from {key}")
+
+        # Update the dataframe in all_data
+        all_data[key] = df
+
+    return all_data
+
 def merge_all_data(all_data):
     print(f"Creating Merged and Calculated Columns")
 
@@ -187,9 +235,21 @@ def merge_all_data(all_data):
         new_col_name="ECU",     # New column name for retrieved cost
     default_value=999           # Default cost if no match is found
 )
+        # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
+    all_data = merge_data_lastcost(all_data, df1_name="L_LPI",        # Main sales table
+        df1_product_col="CODPP",  # Product code in main table
+        df1_date_col="DATA",     # Sale date column
+        df2_name="T_Entradas",    # Cost data table
+        df2_product_col="PAI",    # Product code in cost table
+        df2_date_col="ULTIMA ENTRADA",  # Purchase date column
+        df2_cost_col="ULT CU R$",       # Cost column
+        new_col_name="ECUK",     # New column name for retrieved cost
+    default_value=999           # Default cost if no match is found
+)
+
 
     #all_data = merge_data2v(all_data, "O_NFCI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
-    all_data = merge_data2v(all_data, "L_LPI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
+    #all_data = merge_data2v(all_data, "L_LPI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
     all_data = merge_data2v(all_data, "MLA_Vendas", "ANOMES", "SKU", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
     all_data = merge_data2v(all_data, "MLK_Vendas", "ANOMES", "SKU", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
  
@@ -264,61 +324,76 @@ def merge_all_data(all_data):
             print("Unique values in VALIDO:", df['VALIDO'].unique())
             print("Unique values in KAB:", df['KAB'].unique())
 
-            df['ECTK'] = df['ECU'] * df['QTD'] * df['KAB']
+            df['ECTK'] = df['ECUK'] * df['QTD'] * df['KAB']
 
             # Add the 'TipoAnuncio' column directly from 'MLK_Vendas'
             if 'MLK_Vendas' in all_data:
                 print_table_head(all_data, "MLK_Vendas")
                 df = df.merge(
-                    all_data['MLK_Vendas'][['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO']],
+                    all_data['MLK_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
                     left_on='CÓDIGO PEDIDO',
-                    right_on='N.º DE VENDA_HYPERLINK',
+                    right_on='N.º DE VENDA',
                     how='left'
                 )
-                df['TipoAnuncio'] = df.apply(lambda row: row['TIPO DE ANÚNCIO'] if row['EMPRESA'] == 'K' and row['MP'] == 'ML' else None, axis=1)
-                df.drop(columns=['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO'], inplace=True)
+                df['TipoAnuncioK'] = df.apply(lambda row: 'ML' + row['TIPO DE ANÚNCIO'][:2] if pd.notna(row['TIPO DE ANÚNCIO']) and row['EMPRESA'] == 'K' and row['MP'] == 'ML' else None, axis=1)                    
+                df.drop(columns=['N.º DE VENDA', 'TIPO DE ANÚNCIO'], inplace=True)
 
-            # Add the 'TipoAnuncio' column for 'A' and lookup in 'MLA_Vendas'
+            # Add the 'TipoAnuncio' column for 'ALWE' and lookup in 'MLA_Vendas'
             if 'MLA_Vendas' in all_data:
                 df = df.merge(
-                    all_data['MLA_Vendas'][['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO']],
+                    all_data['MLA_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
                     left_on='CÓDIGO PEDIDO',
-                    right_on='N.º DE VENDA_HYPERLINK',
+                    right_on='N.º DE VENDA',
                     how='left'
                 )
-                df['TipoAnuncio'] = df.apply(lambda row: row['TIPO DE ANÚNCIO'] if row['EMPRESA'] == 'A' and row['MP'] == 'ML' else row['TipoAnuncio'], axis=1)
-                df.drop(columns=['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO'], inplace=True)
+                df['TipoAnuncioA'] = df.apply(lambda row: 'ML' + row['TIPO DE ANÚNCIO'][:2] if pd.notna(row['TIPO DE ANÚNCIO']) and row['EMPRESA'] == 'A' and row['MP'] == 'ML' else None, axis=1)                    
+                df.drop(columns=['N.º DE VENDA', 'TIPO DE ANÚNCIO'], inplace=True)
 
-            # Add colum Compctmp (Comissão pct por Marketplace)
+            # Add the 'TipoAnuncio' column for 'Baby Trends' and lookup in 'MLB_Vendas'
+            if 'MLB_Vendas' in all_data:
+                df = df.merge(
+                    all_data['MLA_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
+                    left_on='CÓDIGO PEDIDO',
+                    right_on='N.º DE VENDA',
+                    how='left'
+                )
+                df['TipoAnuncioB'] = df.apply(lambda row: 'ML' + row['TIPO DE ANÚNCIO'][:2] if pd.notna(row['TIPO DE ANÚNCIO']) and row['EMPRESA'] == 'B' and row['MP'] == 'ML' else None, axis=1)                    
+                df.drop(columns=['N.º DE VENDA', 'TIPO DE ANÚNCIO'], inplace=True)
+            else:
+                # If 'MLB_Vendas' is not in all_data, create 'TipoAnuncioB' and fill with 'G' for EMPRESA == 'B' and MP == 'ML'
+                df['TipoAnuncioB'] = df.apply(lambda row: 'MLG' if row['EMPRESA'] == 'B' and row['MP'] == 'ML' else None, axis=1)
+
+            # Merge Tipo de AnnuncioK/A/B into MP. Ensure that we only process rows where MP == 'ML'
+            df['MP'] = df.apply(
+                lambda row: row['TipoAnuncioK'] if row['EMPRESA'] == 'K' and row['MP'] == 'ML' and pd.notna(row['TipoAnuncioK']) else
+                            row['TipoAnuncioA'] if row['EMPRESA'] == 'A' and row['MP'] == 'ML' and pd.notna(row['TipoAnuncioA']) else
+                            row['TipoAnuncioB'] if row['EMPRESA'] == 'B' and row['MP'] == 'ML' and pd.notna(row['TipoAnuncioB']) else row['MP'],
+                axis=1
+            )
+            # Drop the now redundant columns
+            df.drop(columns=['TipoAnuncioK', 'TipoAnuncioA', 'TipoAnuncioB'], inplace=True)            
+
+            # Add column Compctmp (Comissão pct por Marketplace)
             if 'T_RegrasMP' in all_data:
                 df = df.merge(
-                    all_data['T_RegrasMP'][['MPX', 'TARMP']],
+                    all_data['T_RegrasMP'][['MPX', 'TARMP', 'FFABAIXODE', 'FRETEFIX']],
                     left_on='MP',
                     right_on='MPX',
                     how='left'
                 )
-                df['Compctmp'] = df['TARMP']
-                df.drop(columns=['MPX', 'TARMP'], inplace=True)
+                # Assign marketplace commission percentage
+                df['ComissPctMp'] = df['TARMP']
 
-            # Add colum Compctml (Comissão pct pro ML Classico/Premium)
-                # PROBLEM IS HERE
-                print("######################")
-                print("######################")
-                print("######################")
-                print("######################")
+                # Create the ComPct column based on the condition
+                df['ComissPctVlr'] = df['VLRVENDA'] * df['ComissPctMp']
 
-                df = df.merge(
-                    all_data['T_RegrasMP'][['MPX', 'TARMP']],
-                    left_on='MP',
-                    right_on='MPX',
-                    how='left'
+                # Assign fixed shipping fee based on VLRVENDA threshold
+                df['FreteFixoVlr'] = df.apply(
+                    lambda row: row['FRETEFIX'] if row['VLRVENDA'] < row['FFABAIXODE'] else 0,
+                    axis=1
                 )
-                df['Compctml'] = df['TARMP']
-                df.drop(columns=['MPX', 'TARMP'], inplace=True)
-
-            # Create the ComPct column based on the condition
-            df['ComPct'] = df.apply(lambda row: row['Compctml'] if pd.notnull(row['Compctml']) else row['Compctmp'], axis=1)
-            df['Com'] = df['VLRVENDA'] * df['ComPct'] * df['KAB']
+                # Drop unnecessary columns
+                df.drop(columns=['MPX', 'TARMP', 'FFABAIXODE', 'FRETEFIX'], inplace=True)
 
         elif key == 'MLA_Vendas':
             # Add the 'VALIDO' column directly
@@ -370,6 +445,7 @@ def merge_all_data(all_data):
             # Filter out rows where the classification was not within the proper range
             #df = df.dropna(subset=['CLASSIFICACAO'])
 
+        df = clean_dataframes({key: df})[key]  # Pass only the relevant table for modification
         # Update the dataframe in all_data
         all_data[key] = df
 
