@@ -27,7 +27,7 @@ import re
 
 #Global
 ano_x = 2024
-mes_x = 2
+mes_x = 12
 
 # Define the potential base directories
 path_options = [
@@ -177,7 +177,18 @@ def merge_all_data(all_data):
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_GruposCli", "NomeF", "G1", default_value="V")
 
     # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
-    all_data = merge_data2v(all_data, "O_NFCI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
+    all_data = merge_data_lastcost(all_data, df1_name="O_NFCI",        # Main sales table
+        df1_product_col="CODPP",  # Product code in main table
+        df1_date_col="EMISS",     # Sale date column
+        df2_name="T_Entradas",    # Cost data table
+        df2_product_col="PAI",    # Product code in cost table
+        df2_date_col="ULTIMA ENTRADA",  # Purchase date column
+        df2_cost_col="ULT CU R$",       # Cost column
+        new_col_name="ECU",     # New column name for retrieved cost
+    default_value=999           # Default cost if no match is found
+)
+
+    #all_data = merge_data2v(all_data, "O_NFCI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
     all_data = merge_data2v(all_data, "L_LPI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
     all_data = merge_data2v(all_data, "MLA_Vendas", "ANOMES", "SKU", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
     all_data = merge_data2v(all_data, "MLK_Vendas", "ANOMES", "SKU", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
@@ -217,10 +228,10 @@ def merge_all_data(all_data):
         if key == 'O_NFCI':
             # print_table_and_columns(all_data, "O_NFCI")
 
-            # Create column "C"
+            # Create column "C" (C)onta pra calculo (remessa não conta)
             df['C'] = 1 - df['REM_NF']
             
-            # Create column "B"
+            # Create column "B" (B)onificado
             df['B'] = df.apply(lambda row: 1 if row['OP'] == 'REMESSA DE PRODUTO' and row['C'] == 1 else 0, axis=1)
             
             # Create column ECT (ECU x QTD)
@@ -444,6 +455,74 @@ def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2
         #print(f"Columns after merge: {merged_df.columns}")
         all_data[df1_name] = merged_df
     return all_data
+
+def merge_data_lastcost(all_data, df1_name, df1_product_col, df1_date_col, df2_name, df2_product_col, df2_date_col, df2_cost_col, new_col_name, default_value=None):
+    """
+    Merge df1 (sales table) with df2 (cost table) to get the last recorded cost before the sale date.
+
+    Parameters:
+    - all_data (dict): Dictionary containing all datasets.
+    - df1_name (str): Key for the main table (sales) in all_data.
+    - df1_product_col (str): Column name for the product code in the main table.
+    - df1_date_col (str): Column name for the sale date in the main table.
+    - df2_name (str): Key for the cost table in all_data.
+    - df2_product_col (str): Column name for the product code in the cost table.
+    - df2_date_col (str): Column name for the purchase date in the cost table.
+    - df2_cost_col (str): Column name for the cost value in the cost table.
+    - new_col_name (str): Name of the new column to store the retrieved cost.
+    - default_value (optional): Default value to use if no match is found.
+
+    Returns:
+    - all_data (dict): Updated dictionary with the main table modified to include last cost.
+    """
+
+    # Standardize column names to uppercase
+    df1_product_col = df1_product_col.upper()
+    df1_date_col = df1_date_col.upper()
+    df2_product_col = df2_product_col.upper()
+    df2_date_col = df2_date_col.upper()
+    df2_cost_col = df2_cost_col.upper()
+    new_col_name = new_col_name.upper()
+
+    if df1_name in all_data and df2_name in all_data:
+        df1 = all_data[df1_name]
+        df2 = all_data[df2_name]
+
+        # Standardize column names
+        df1.columns = [col.upper() for col in df1.columns]
+        df2.columns = [col.upper() for col in df2.columns]
+
+        # Check if required columns exist
+        missing_cols = [col for col in [df1_product_col, df1_date_col] if col not in df1.columns] + \
+                       [col for col in [df2_product_col, df2_date_col, df2_cost_col] if col not in df2.columns]
+        if missing_cols:
+            raise KeyError(f"Missing columns in dataframes: {missing_cols}")
+
+        # Convert dates to datetime format
+        df1[df1_date_col] = pd.to_datetime(df1[df1_date_col])
+        df2[df2_date_col] = pd.to_datetime(df2[df2_date_col])
+
+        # Sort df2 (cost table) by product and date descending
+        df2 = df2.sort_values(by=[df2_product_col, df2_date_col], ascending=[True, False])
+
+        # Merge based on product and latest entry before sale date
+        def get_last_cost(row):
+            product = row[df1_product_col]
+            sale_date = row[df1_date_col]
+
+            # Filter cost table for matching product and valid entry dates
+            valid_costs = df2[(df2[df2_product_col] == product) & (df2[df2_date_col] <= sale_date)]
+
+            # Return the most recent cost before the sale date
+            return valid_costs[df2_cost_col].iloc[0] if not valid_costs.empty else default_value
+
+        df1[new_col_name] = df1.apply(get_last_cost, axis=1)
+
+        # Update the dataset in all_data dictionary
+        all_data[df1_name] = df1
+
+    return all_data
+
 
 def compute_NFCI_ANOMES(all_data):
     for key, df in all_data.items():
