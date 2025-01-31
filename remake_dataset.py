@@ -103,6 +103,12 @@ column_format_dict = {
         'ComissPctMp': '0.0%',
         'ComissVlr': '#,##0.00',
         'FreteFixoVlr': '#,##0.00',
+        'Repasse': '#,##0.00',
+        'ImpLP': '#,##0.00',
+        'ImpICMS': '#,##0.00',
+        'ImpTot': '#,##0.00',
+        'MargVlr': '#,##0.00',
+        'MargPct': '0.0%',
     },
     'MLK_Vendas':{
         'MARGVLR': '#,##0.00',        
@@ -385,15 +391,70 @@ def merge_all_data(all_data):
                 df['ComissPctMp'] = df['TARMP']
 
                 # Create the ComPct column based on the condition
-                df['ComissPctVlr'] = df['VLRVENDA'] * df['ComissPctMp']
+                df['ComissPctVlr'] = df['VLRVENDA'] * df['ComissPctMp'] * -1
 
                 # Assign fixed shipping fee based on VLRVENDA threshold
                 df['FreteFixoVlr'] = df.apply(
-                    lambda row: row['FRETEFIX'] if row['VLRVENDA'] < row['FFABAIXODE'] else 0,
+                    lambda row: -row['FRETEFIX'] if row['VLRVENDA'] < row['FFABAIXODE'] else 0,
                     axis=1
                 )
                 # Drop unnecessary columns
                 df.drop(columns=['MPX', 'TARMP', 'FFABAIXODE', 'FRETEFIX'], inplace=True)
+
+            # Compute FretePaiVlr based on T_FretesMP
+            if 'T_FretesMP' in all_data:
+                df_fretesmp = all_data['T_FretesMP']
+
+                # Extract first two letters of MP
+                df['MP_2L'] = df['MP'].str[:2].str.upper()
+
+                # Function to lookup the freight cost
+                def get_frete_pai(row):
+                    codpp = row['CODPP']
+                    mp_col = row['MP_2L']
+
+                    # Ensure the column exists in T_FretesMP
+                    if mp_col not in df_fretesmp.columns:
+                        return 99  # If marketplace column doesn't exist, return 99
+
+                    # Try to find freight cost for the given CODPP
+                    match = df_fretesmp[df_fretesmp['CODPP'] == codpp]
+                    if not match.empty:
+                        return match[mp_col].values[0]  # Return corresponding marketplace freight cost
+
+                    # If CODPP not found, use generic cost for 'XXX'
+                    generic_match = df_fretesmp[df_fretesmp['CODPP'] == 'XXX']
+                    if not generic_match.empty:
+                        return generic_match[mp_col].values[0]
+
+                    return 99  # Default to 0 if no match found
+
+                # Apply lookup function
+                df['FreteProdVlr'] = df.apply(lambda row: -get_frete_pai(row), axis=1)
+
+                # Drop temporary column MP_2L
+                df.drop(columns=['MP_2L'], inplace=True)
+
+            # Create column Rebate for later use
+            df['Rebate'] = 0.0
+            df['Repasse'] = df['VLRVENDA'] + df['ComissPctVlr'] + df['FreteFixoVlr'] + df['FreteProdVlr'] + df['Rebate']
+            df['ImpLP'] = df.apply(
+                lambda row: -0.0925 * row['VLRVENDA'] if row['EMPRESA'] == 'K' else
+                            -0.14 * row['VLRVENDA'] if row['EMPRESA'] == 'A' else
+                            -0.10 * row['VLRVENDA'] if row['EMPRESA'] == 'B' else 0,
+                axis=1)
+            df['ImpICMS'] = df.apply(
+                lambda row: -0.18 * row['VLRVENDA'] if row['EMPRESA'] == 'K' else 0,
+                axis=1)
+            df['ImpTot'] = df['ImpLP'] + df['ImpICMS']
+
+            df['MargVlr'] = df.apply(
+                lambda row: row['Repasse'] + row['ImpTot'] - row['ECTK'] -1 if row['EMPRESA'] == 'K' else
+                            row['Repasse'] + row['ImpTot'] - 1.6*row['ECTK'],
+                axis=1)
+
+            # Create column VerbaVLR (VerbaPCT x TotalNF)
+            df['MargPct'] = df['MargVlr'] / df['VLRVENDA']
 
         elif key == 'MLA_Vendas':
             # Add the 'VALIDO' column directly
