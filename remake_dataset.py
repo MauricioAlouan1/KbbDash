@@ -26,8 +26,8 @@ from openpyxl.styles import NamedStyle, Font, PatternFill, Alignment
 import re
 
 #Global
-ano_x = 2024
-mes_x = 12
+ano_x = 2025
+mes_x = 1
 
 # Define the potential base directories
 path_options = [
@@ -449,8 +449,9 @@ def merge_all_data(all_data):
             df['ImpTot'] = df['ImpLP'] + df['ImpICMS']
 
             df['MargVlr'] = df.apply(
-                lambda row: row['Repasse'] + row['ImpTot'] - row['ECTK'] -1 if row['EMPRESA'] == 'K' else
-                            row['Repasse'] + row['ImpTot'] - 1.6*row['ECTK'],
+                lambda row: 0 if row['EMPRESA'] == 'NC' else
+                            row['Repasse'] + row['ImpTot'] - row['ECTK'] - 1 if row['EMPRESA'] == 'K' else
+                            row['Repasse'] + row['ImpTot'] - 1.6 * row['ECTK'],
                 axis=1)
 
             # Create column VerbaVLR (VerbaPCT x TotalNF)
