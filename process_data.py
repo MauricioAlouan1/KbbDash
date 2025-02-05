@@ -317,7 +317,10 @@ def check_and_process_files():
                         clean_subdir = os.path.join(clean_dir, os.path.basename(subdir))
                         clean_filepath = os.path.join(clean_subdir, file.replace('.xlsx', '_clean.xlsx'))
                         
-                        if not os.path.exists(clean_filepath):
+                        raw_mtime = os.path.getmtime(raw_filepath)  # Get modification time of raw file
+                        clean_mtime = os.path.getmtime(clean_filepath) if os.path.exists(clean_filepath) else 0
+
+                        if not os.path.exists(clean_filepath) or raw_mtime > clean_mtime:
                             print(f"Processing {file}...")
                             try:
                                 data = load_and_clean_data(raw_filepath, processor, header_name, use_hyperlinks)
