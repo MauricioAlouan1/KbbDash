@@ -254,22 +254,18 @@ def merge_all_data(all_data):
     default_value=999           # Default cost if no match is found
 )
         # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
-    all_data = merge_data_lastcost(all_data, df1_name="MLK_Vedas",        # Main sales table
+    all_data = merge_data_lastcost(all_data, df1_name="MLK_Vendas",        # Main sales table
         df1_product_col="CODPP",  # Product code in main table
-        df1_date_col="DATA",     # Sale date column
+        df1_date_col="DATA DA VENDA",     # Sale date column
         df2_name="T_Entradas",    # Cost data table
         df2_product_col="PAI",    # Product code in cost table
         df2_date_col="ULTIMA ENTRADA",  # Purchase date column
         df2_cost_col="ULT CU R$",       # Cost column
-        new_col_name="ECUK",     # New column name for retrieved cost
+        new_col_name="ECU",     # New column name for retrieved cost
     default_value=999           # Default cost if no match is found
 )
 
-
-    #all_data = merge_data2v(all_data, "O_NFCI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
-    #all_data = merge_data2v(all_data, "L_LPI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
     all_data = merge_data2v(all_data, "MLA_Vendas", "ANOMES", "SKU", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
-    all_data = merge_data2v(all_data, "MLK_Vendas", "ANOMES", "SKU", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
  
     # Merge VENDEDOR with T_REPS for COMPCT
     all_data = merge_data(all_data, "O_NFCI", "Vendedor", "T_Reps", "Vendedor", "COMISSPCT", default_value=0)
@@ -337,10 +333,10 @@ def merge_all_data(all_data):
             # Add the 'Valido' column directly
             df['VALIDO'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
             df['KAB'] = df.apply(lambda row: 1 if row['VALIDO'] == 1 and row['EMPRESA'] in ['K', 'A', 'B'] else 0, axis=1)
-            print("#### DEBUG  ####")
-            print("Unique values in EMPRESA:", df['EMPRESA'].unique())
-            print("Unique values in VALIDO:", df['VALIDO'].unique())
-            print("Unique values in KAB:", df['KAB'].unique())
+            #print("#### DEBUG  ####")
+            #print("Unique values in EMPRESA:", df['EMPRESA'].unique())
+            #print("Unique values in VALIDO:", df['VALIDO'].unique())
+            #print("Unique values in KAB:", df['KAB'].unique())
 
             df['ECTK'] = df['ECUK'] * df['QTD'] * df['KAB']
 
@@ -904,7 +900,7 @@ def calculate_realized_cost(inventory_df):
             'Quantity': row['Quantity'],
             'Custo Total Unit': row['Custo Total Unit']
         })
-    print("Purchase List:", purchase_list)  # Debug print
+    #print("Purchase List:", purchase_list)  # Debug print
 
     # Iterate through the sales (V) and populate the realized cost details
     for index, row in inventory_df[inventory_df['CV'] == 'V'].iterrows():
@@ -943,10 +939,8 @@ def calculate_realized_cost(inventory_df):
                 inventory_df.at[purchase_index, 'CMV Unit E'] = purchase['Custo Total Unit']
                 inventory_df.at[purchase_index, 'CMV Mov E'] = purchase['Quantity'] * purchase['Custo Total Unit']
 
-    print(inventory_df)  # Debug print
+    #print(inventory_df)  # Debug print
     return inventory_df
-
-
 
 # Function to perform the inventory audit
 def perform_invaudit(o_nfci_df, l_lpi_df, client_name):
