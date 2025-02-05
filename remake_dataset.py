@@ -71,7 +71,8 @@ column_rename_dict = {
     },
     'MLK_Vendas' : {
         'PREÇO UNITÁRIO DE VENDA DO ANÚNCIO (BRL)': 'PRECOUNIT',
-        'Quantidade' : 'QTD'
+        'Quantidade' : 'QTD',
+        'DATA DA VENDA' : 'DATA'
     }
     # Add dictionaries for other dataframes...
 }
@@ -243,6 +244,17 @@ def merge_all_data(all_data):
 )
         # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
     all_data = merge_data_lastcost(all_data, df1_name="L_LPI",        # Main sales table
+        df1_product_col="CODPP",  # Product code in main table
+        df1_date_col="DATA",     # Sale date column
+        df2_name="T_Entradas",    # Cost data table
+        df2_product_col="PAI",    # Product code in cost table
+        df2_date_col="ULTIMA ENTRADA",  # Purchase date column
+        df2_cost_col="ULT CU R$",       # Cost column
+        new_col_name="ECUK",     # New column name for retrieved cost
+    default_value=999           # Default cost if no match is found
+)
+        # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
+    all_data = merge_data_lastcost(all_data, df1_name="MLK_Vedas",        # Main sales table
         df1_product_col="CODPP",  # Product code in main table
         df1_date_col="DATA",     # Sale date column
         df2_name="T_Entradas",    # Cost data table

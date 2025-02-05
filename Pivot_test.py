@@ -1,11 +1,36 @@
+import os
 import pandas as pd
 import shutil
 from openpyxl import load_workbook
 
-# Define paths
-source_file = "/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/clean/2025_01/R_Resumo_2025_01.xlsx"
-template_file = "/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/Template/PivotTemplate.xlsm"
-output_file = "/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/clean/2025_01/Pivot_Report_2025_01.xlsm"
+#Global
+ano_x = 2025
+mes_x = 1
+
+# Format month as two digits (01, 02, ..., 12)
+mes_str = f"{mes_x:02d}"
+ano_mes = f"{ano_x}_{mes_str}"  # e.g., "2025_01"
+
+# Define the potential base directories
+path_options = [
+    '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/',
+    '/Users/simon/Library/CloudStorage/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data'
+]
+# Iterate over the list and set base_dir to the first existing path
+for path in path_options:
+    if os.path.exists(path):
+        base_dir = path
+        break
+else:
+    # If no valid path is found, raise an error or handle it appropriately
+    print("None of the specified directories exist.")
+    base_dir = None  # Or set a default path if appropriate
+print("Base directory set to:", base_dir)
+
+# Define paths dynamically using global variables
+source_file = os.path.join(base_dir, "clean", ano_mes, f"R_Resumo_{ano_mes}.xlsx")
+template_file = os.path.join(base_dir, "Template", "PivotTemplate.xlsm")
+output_file = os.path.join(base_dir, "clean", ano_mes, f"Pivot_Report_{ano_mes}.xlsm")
 
 # Step 1: Copy the template (preserves macros)
 shutil.copy(template_file, output_file)
