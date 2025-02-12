@@ -44,10 +44,10 @@ else:
     base_dir = None
 
 # Define the date range variables
-start_year = 2024
-start_month = 12
-end_year = 2024
-end_month = 12
+start_year = 2025
+start_month = 1
+end_year = 2025
+end_month = 1
 
 # Function to process inventory files for a given month and year
 def process_inventory_files(year, month):
