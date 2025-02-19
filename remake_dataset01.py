@@ -19,15 +19,21 @@ This script is integral to maintaining data accuracy and efficiency in the repor
 import pandas as pd
 from pandas.tseries.offsets import MonthEnd
 import os
+import shutil
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from openpyxl import load_workbook
-from openpyxl.styles import NamedStyle, Font, PatternFill, Alignment
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.styles import NamedStyle, Font, PatternFill, Alignment, Border, Side
 import re
 
 #Global
 ano_x = 2025
 mes_x = 1
+
+# Format month as two digits (01, 02, ..., 12)
+mes_str = f"{mes_x:02d}"
+ano_mes = f"{ano_x}_{mes_str}"  # e.g., "2025_01"
 
 # Define the potential base directories
 path_options = [
@@ -46,6 +52,22 @@ else:
 print("Base directory set to:", base_dir)
 static_dir = os.path.join(base_dir, 'Tables')
 inventory_file_path = os.path.join(static_dir, 'R_EstoqComp.xlsx')  # Update to the correct path if needed
+template_file = os.path.join(base_dir, "Template", "PivotTemplate.xlsm")
+output_file = os.path.join(base_dir, "clean", ano_mes, f"R_Resumo_{ano_mes}.xlsm")
+
+# Step 1: Copy the template (preserves macros)
+shutil.copy(template_file, output_file)
+print(f"✅ Copied template to {output_file}")
+
+# Step 2: Open the template workbook with macros
+print("✅ Opening template with macros...")
+wb_template = load_workbook(output_file, keep_vba=True)
+
+# Step 3: Remove all existing sheets from the template
+print(f"✅ Removing {len(wb_template.sheetnames)} sheets from template...")
+for sheet in wb_template.sheetnames:
+    del wb_template[sheet]
+
 
 column_rename_dict = {
     'O_NFCI': {
@@ -757,6 +779,7 @@ def print_all_tables_and_columns(all_data):
         #print(f"Table: {table_name}")
         #print("Columns:", df.columns.tolist())
         print("-" * 50)
+
 def print_table_and_columns(all_data, table_name):
     if table_name in all_data:
         #print(f"Table: {table_name}")
@@ -764,6 +787,7 @@ def print_table_and_columns(all_data, table_name):
         print("-" * 50)
     else:
         print(f"Table '{table_name}' not found in the dataset.")
+
 def print_table_head(all_data, table_name):
     """
     Print the column names and the first 10 rows of a DataFrame.
@@ -775,48 +799,68 @@ def print_table_head(all_data, table_name):
     print("\nTop 10 Rows:")
     #print(all_data[table_name].head(10))
 
-def excel_format(output_path, column_format_dict):
-    print("Formatting all sheets")
-    header_style = NamedStyle(name="header_style")
-    header_style.font = Font(bold=True)
-    header_style.fill = PatternFill("solid", fgColor="6ac5fe")  # Light blue background color
-    header_style.alignment = Alignment(horizontal="center", vertical="center")
+def excel_format(output_file, column_format_dict):
+    # Load the workbook with macros
+    wb = load_workbook(output_file, keep_vba=True)
 
-    workbook = load_workbook(output_path)
-    for sheet_name in workbook.sheetnames:
-        worksheet = workbook[sheet_name]
-        
-        # Apply header style
-        for col_idx in range(1, worksheet.max_column + 1):
-            cell = worksheet.cell(row=1, column=col_idx)
-            cell.style = header_style
+    # Check if the style already exists
+    if "header_style" not in wb.named_styles:
+        header_style = NamedStyle(name="header_style")
+        header_style.font = Font(bold=True)
+        header_style.alignment = Alignment(horizontal="center", vertical="center")
+        header_style.border = Border(
+            left=Side(style="thin"),
+            right=Side(style="thin"),
+            top=Side(style="thin"),
+            bottom=Side(style="thin")
+        )
+        wb.add_named_style(header_style)  # Only add if it doesn't exist
 
-        if sheet_name in column_format_dict:
-            formats = column_format_dict[sheet_name]
-            for col_name, col_format in formats.items():
-                # Find the column index based on header name
-                for col_idx, cell in enumerate(worksheet[1], start=1):
-                    if cell.value == col_name:
-                        break
-                else:
-                    continue  # Skip if column name is not found
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        print(f"✅ Formatting sheet: {sheet_name}")
 
-                # Apply the format to the entire column
-                for row_idx in range(2, worksheet.max_row + 1):  # Start from the second row to avoid header
-                    cell = worksheet.cell(row=row_idx, column=col_idx)
-                    cell.number_format = col_format
+        # Apply header style safely
+        for cell in ws[1]:  # First row (header)
+            cell.style = "header_style"
 
-    workbook.save(output_path)
-    print(f"All sheets formatted")
+    # **CRITICAL**: Save the workbook while keeping macros
+    try:
+        #base_name, ext = os.path.splitext(output_file)
+        #versioned_output_file = f"{base_name}_01{ext}"
+        #wb.save(versioned_output_file)
+        wb.save(output_file)
+        print(f"✅ Successfully formatted and saved {output_file}")
+    except Exception as e:
+        print(f"❌ Error saving {output_file}: {e}")
 
 def excel_autofilters(output_path):
-    print("Adding auto-filters to all sheets")
-    workbook = load_workbook(output_path)
+    print(f"✅ Adding auto-filters to {output_path}")
+    
+    # Open workbook while preserving macros
+    workbook = load_workbook(output_path, keep_vba=True)  
+
     for sheetname in workbook.sheetnames:
         worksheet = workbook[sheetname]
-        worksheet.auto_filter.ref = worksheet.dimensions
-    workbook.save(output_path)
-    print("Added auto-filters to all sheets")
+        print(f"🔹 Processing sheet: {sheetname}")
+
+        # Check if the worksheet has any data
+        if worksheet.max_row > 1 and worksheet.max_column > 1:
+            data_range = worksheet.dimensions
+            if data_range and ":" in data_range:  # Ensure valid range
+                worksheet.auto_filter.ref = data_range
+                print(f"✅ Auto-filter applied to {sheetname}: {data_range}")
+            else:
+                print(f"⚠️ Skipping {sheetname}: No valid data range found.")
+        else:
+            print(f"⚠️ Skipping {sheetname}: Sheet is empty or has only headers.")
+
+    # Save changes while keeping macros
+    try:
+        workbook.save(output_path)
+        print(f"✅ Auto-filters added and saved: {output_path}")
+    except Exception as e:
+        print(f"❌ Error saving {output_path}: {e}")
 
 # Define the audit function
 def perform_audit(df, client_name):
@@ -994,7 +1038,7 @@ def main():
 
     # Load static data
     static_tables = ['T_CondPagto.xlsx', 'T_Fretes.xlsx', 'T_GruposCli.xlsx', 'T_MP.xlsx', 
-                     'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx','T_Vol.xlsx', 'T_ProdF.xlsx', 
+                     'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx', 'T_Vol.xlsx', 'T_ProdF.xlsx', 
                      'T_ProdP.xlsx', 'T_Entradas.xlsx', 'T_FretesMP.xlsx', 'T_MLStatus.xlsx', 'T_CtasAPagarClass.xlsx',
                      'T_CtasARecClass.xlsx', 'T_CCCats.xlsx']
     static_data_dict = {table.replace('.xlsx', ''): load_static_data(static_dir, table) for table in static_tables}
@@ -1004,9 +1048,9 @@ def main():
         print(f"Static data {key} shape: {df.shape}")  # Debug print
     
     inventory_data = preprocess_inventory_data(inventory_file_path)
- 
+
     # Add static data to all_data dictionary
-    all_data.update(static_data_dict) 
+    all_data.update(static_data_dict)
     all_data.update(inventory_data)
     
     all_data = rename_columns(all_data, column_rename_dict)
@@ -1018,23 +1062,24 @@ def main():
     all_data = perform_all_audits(all_data)
     print(f"Audit completed for clients: {', '.join(audit_client_names)}")
 
-    # Perform innventory audits for the specified clients
+    # Perform inventory audits for the specified clients
     all_data = perform_all_invaudits(all_data)
     print(f"INVENTORY Audit completed for clients: {', '.join(audit_client_names)}")
 
-    # Save all data to one Excel file with multiple sheets
-    current_date = datetime(ano_x, mes_x, 1)
-    year_month = current_date.strftime('%Y_%m')
-    output_path = os.path.join(base_dir, 'clean', year_month, f'R_Resumo_{year_month}.xlsx')
-    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-        for key, df in all_data.items():
-            df.to_excel(writer, sheet_name=key, index=False)
-            print(f"Added {key} data to {output_path} in sheet {key}")  # Debug print
+   # Write to the existing template (wb_template)
+    for key, df in all_data.items():
+        ws = wb_template.create_sheet(title=key)
+        for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
+            for c_idx, value in enumerate(row, 1):
+                ws.cell(row=r_idx, column=c_idx, value=value)
+        print(f"✅ Added {key} data to {output_file} in sheet {key}")  # Debug print
 
-    print(f"All merged data saved to {output_path}")
+    # Save the modified workbook
+    wb_template.save(output_file)
+    print(f"✅ All merged data saved to {output_file}")
 
-    excel_format(output_path, column_format_dict)
-    excel_autofilters(output_path)
+    excel_format(output_file, column_format_dict)
+    excel_autofilters(output_file)
 
 if __name__ == "__main__":
     main()
