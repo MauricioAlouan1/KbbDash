@@ -46,8 +46,8 @@ else:
 # Define the date range variables
 start_year = 2025
 start_month = 1
-end_year = 2025
-end_month = 1
+end_year = start_year
+end_month = start_month
 
 # Function to process inventory files for a given month and year
 def process_inventory_files(year, month):
