@@ -28,8 +28,8 @@ from openpyxl.styles import NamedStyle, Font, PatternFill, Alignment, Border, Si
 import re
 
 #Global
-ano_x = 2025
-mes_x = 1
+ano_x = 2024
+mes_x = 10
 
 # Format month as two digits (01, 02, ..., 12)
 mes_str = f"{mes_x:02d}"
