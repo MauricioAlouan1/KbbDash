@@ -29,7 +29,7 @@ import re
 
 #Global
 ano_x = 2024
-mes_x = 10
+mes_x = 1
 
 # Format month as two digits (01, 02, ..., 12)
 mes_str = f"{mes_x:02d}"
@@ -134,8 +134,13 @@ column_format_dict = {
         'MargPct': '0.0%',
     },
     'MLK_Vendas':{
-        'MARGVLR': '#,##0.00',        
+        'MARGVLR': '#,##0.00',
         'MARGPCT': '0.00%',
+        'ECU': '#,##0.00',
+        'ECTK': '#,##0.00',
+        'Imposto1': '#,##0.00',
+        'Imposto2': '#,##0.00',
+        'ImpostoT': '#,##0.00',
     },
 
     # Add dictionaries for other dataframes...
@@ -480,7 +485,7 @@ def merge_all_data(all_data):
 
             df['MargVlr'] = df.apply(
                 lambda row: 0 if row['EMPRESA'] == 'NC' else
-                            row['Repasse'] + row['ImpTot'] - row['ECTK'] - 1 if row['EMPRESA'] == 'K' else
+                            row['Repasse'] + row['ImpTot'] - row['ECTK'] - 1 - (0.01)*row['VLRVENDA'] if row['EMPRESA'] == 'K' else
                             row['Repasse'] + row['ImpTot'] - 1.6 * row['ECTK'],
                 axis=1)
 
@@ -506,7 +511,7 @@ def merge_all_data(all_data):
             df['ImpostoT'] =  df['Imposto1'] + df['Imposto2']
 
             # Create column MargCVlr
-            df['MARGVLR'] = df['REPASSE'] - df['ImpostoT'] - df['ECTK'] - (1)
+            df['MARGVLR'] = df['REPASSE'] - df['ImpostoT'] - df['ECTK'] - (1) -(.01)*df['VLRTOTALPSKU']
             df['MARGPCT'] = df['MARGVLR'] / df['VLRTOTALPSKU']
 
             cols_to_drop = ['CODPF_x', 'CODPF_y', 'MLSTATUS']
