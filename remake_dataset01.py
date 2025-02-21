@@ -19,15 +19,21 @@ This script is integral to maintaining data accuracy and efficiency in the repor
 import pandas as pd
 from pandas.tseries.offsets import MonthEnd
 import os
+import shutil
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from openpyxl import load_workbook
-from openpyxl.styles import NamedStyle, Font, PatternFill, Alignment
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.styles import NamedStyle, Font, PatternFill, Alignment, Border, Side
 import re
 
-#Define Global Values
-start_date=None
-end_date=None
+#Global
+ano_x = 2024
+mes_x = 1
+
+# Format month as two digits (01, 02, ..., 12)
+mes_str = f"{mes_x:02d}"
+ano_mes = f"{ano_x}_{mes_str}"  # e.g., "2025_01"
 
 # Define the potential base directories
 path_options = [
@@ -46,6 +52,22 @@ else:
 print("Base directory set to:", base_dir)
 static_dir = os.path.join(base_dir, 'Tables')
 inventory_file_path = os.path.join(static_dir, 'R_EstoqComp.xlsx')  # Update to the correct path if needed
+template_file = os.path.join(base_dir, "Template", "PivotTemplate.xlsm")
+output_file = os.path.join(base_dir, "clean", ano_mes, f"R_Resumo_{ano_mes}.xlsm")
+
+# Step 1: Copy the template (preserves macros)
+shutil.copy(template_file, output_file)
+print(f"✅ Copied template to {output_file}")
+
+# Step 2: Open the template workbook with macros
+print("✅ Opening template with macros...")
+wb_template = load_workbook(output_file, keep_vba=True)
+
+# Step 3: Remove all existing sheets from the template
+print(f"✅ Removing {len(wb_template.sheetnames)} sheets from template...")
+for sheet in wb_template.sheetnames:
+    del wb_template[sheet]
+
 
 column_rename_dict = {
     'O_NFCI': {
@@ -72,11 +94,10 @@ column_rename_dict = {
     'MLK_Vendas' : {
         'PREÇO UNITÁRIO DE VENDA DO ANÚNCIO (BRL)': 'PRECOUNIT',
         'Quantidade' : 'QTD',
-        'Tipo de anúncio' : 'TipoAnuncio'
+        'DATA DA VENDA' : 'DATA'
     }
     # Add dictionaries for other dataframes...
 }
-
 column_format_dict = {
     'O_NFCI': {
         'EMISS': 'DD-MMM-YY',
@@ -100,16 +121,45 @@ column_format_dict = {
     },
     'L_LPI':{
         'VLRVENDA': '#,##0.00',        
-        'ECU': '#,##0.00',
+        'ECUK': '#,##0.00',
         'ECTK': '#,##0.00',
+        'ComissPctMp': '0.0%',
+        'ComissVlr': '#,##0.00',
+        'FreteFixoVlr': '#,##0.00',
+        'Repasse': '#,##0.00',
+        'ImpLP': '#,##0.00',
+        'ImpICMS': '#,##0.00',
+        'ImpTot': '#,##0.00',
+        'MargVlr': '#,##0.00',
+        'MargPct': '0.0%',
     },
     'MLK_Vendas':{
-        'MARGVLR': '#,##0.00',        
+        'MARGVLR': '#,##0.00',
         'MARGPCT': '0.00%',
+        'ECU': '#,##0.00',
+        'ECTK': '#,##0.00',
+        'Imposto1': '#,##0.00',
+        'Imposto2': '#,##0.00',
+        'ImpostoT': '#,##0.00',
     },
 
     # Add dictionaries for other dataframes...
 }
+
+rows_todrop = {
+    'O_NFCI': {
+        'C': 0,
+    }
+}
+
+cols_todrop = {
+    'O_NFCI': {
+        'PROJETO': 'd',
+        'C': 'd',
+    }
+}
+
+
 
 audit_client_names = ['ALWE', 'COMPROU CHEGOU', 'NEXT COMPRA']  # Add other clients as needed
 invaudit_client_names = ['ALWE', 'COMPROU CHEGOU', 'NEXT COMPRA']  # Add other clients as needed
@@ -119,42 +169,26 @@ def rename_columns(all_data, column_rename_dict):
         if df_name in all_data:
             df = all_data[df_name]
             # Debug print to verify columns before renaming
-            print(f"Before rename:\nTable: {df_name}\nColumns: {df.columns.tolist()}")
+            #print(f"Before rename:\nTable: {df_name}\nColumns: {df.columns.tolist()}")
             df.rename(columns=rename_dict, inplace=True)
             # Debug print to verify columns after renaming
-            print(f"Renamed columns in {df_name}: {rename_dict}")
-            print(f"Columns in {df_name}: {df.columns.tolist()}")
-            print(f"Data types in {df_name}: {df.dtypes.tolist()}")
+            #print(f"Renamed columns in {df_name}: {rename_dict}")
+            #print(f"Columns in {df_name}: {df.columns.tolist()}")
             all_data[df_name] = df
     return all_data
 
-def load_recent_data(base_dir, file_pattern, start_date=None, end_date=None):
-    # Set default end_date if not provided
-    if end_date is None:
-        #end_date = datetime.now()
-        end_date = datetime(2024, 12, 31)
-        
-    # Set default start_date if not provided
-    if start_date is None:
-        #start_date = end_date - timedelta(days=30)  # Default to last month
-        start_date = datetime(2024, 11, 1)
-
-    # Calculate the number of months between start_date and end_date
-    months = (end_date.year - start_date.year) * 12 + end_date.month - start_date.month
-
+def load_recent_data(base_dir, file_pattern, ds_year = ano_x, ds_month = mes_x):
+ 
     frames = []
-    current_date = start_date
-    while current_date <= end_date:
-        year_month = current_date.strftime('%Y_%m')
-        file_path = os.path.join(base_dir, 'clean', year_month, file_pattern.format(year_month=year_month))
-        if os.path.exists(file_path):
-            df = pd.read_excel(file_path)
-            frames.append(df)
-            print(f"Loaded {file_path} with shape: {df.shape}")  # Debug print
-        else:
-            print(f"File not found: {file_path}")  # Debug print
-        # Increment by one month using relativedelta
-        current_date += relativedelta(months=1)
+    current_date = datetime(ds_year, ds_month, 1)
+    year_month = current_date.strftime('%Y_%m')
+    file_path = os.path.join(base_dir, 'clean', year_month, file_pattern.format(year_month=year_month))
+    if os.path.exists(file_path):
+        df = pd.read_excel(file_path)
+        frames.append(df)
+        #print(f"Loaded {file_path} with shape: {df.shape}")  # Debug print
+    else:
+        print(f"File not found: {file_path}")  # Debug print
 
     return pd.concat(frames) if frames else pd.DataFrame()
 
@@ -168,6 +202,37 @@ def standardize_text_case(df):
         for col in df.select_dtypes(include=[object]).columns:
             df[col] = df[col].str.upper()
     return df
+
+def clean_dataframes(all_data):
+    """
+    Drops specified rows and columns from each table in all_data based on global variables rows_todrop and cols_todrop.
+    
+    Parameters:
+    - all_data (dict): Dictionary containing all datasets.
+
+    Returns:
+    - all_data (dict): Updated dictionary with rows and columns removed as per defined rules.
+    """
+    global rows_todrop, cols_todrop
+
+    for key, df in all_data.items():
+        # Drop rows based on conditions in rows_todrop
+        if key in rows_todrop:
+            for col, value in rows_todrop[key].items():
+                if col in df.columns:
+                    df = df[df[col] != value]  # Keep rows where column is NOT equal to the specified value
+                    print(f"Dropped rows in {key} where {col} = {value}")
+
+        # Drop columns based on conditions in cols_todrop
+        if key in cols_todrop:
+            cols_to_remove = [col for col in cols_todrop[key].keys() if col in df.columns]
+            df = df.drop(columns=cols_to_remove, errors='ignore')
+            print(f"Dropped columns {cols_to_remove} from {key}")
+
+        # Update the dataframe in all_data
+        all_data[key] = df
+
+    return all_data
 
 def merge_all_data(all_data):
     print(f"Creating Merged and Calculated Columns")
@@ -194,10 +259,40 @@ def merge_all_data(all_data):
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_GruposCli", "NomeF", "G1", default_value="V")
 
     # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
-    all_data = merge_data2v(all_data, "O_NFCI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
-    all_data = merge_data2v(all_data, "L_LPI", "ANOMES", "CodPF", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
+    all_data = merge_data_lastcost(all_data, df1_name="O_NFCI",        # Main sales table
+        df1_product_col="CODPP",  # Product code in main table
+        df1_date_col="EMISS",     # Sale date column
+        df2_name="T_Entradas",    # Cost data table
+        df2_product_col="PAI",    # Product code in cost table
+        df2_date_col="ULTIMA ENTRADA",  # Purchase date column
+        df2_cost_col="ULT CU R$",       # Cost column
+        new_col_name="ECU",     # New column name for retrieved cost
+    default_value=999           # Default cost if no match is found
+)
+        # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
+    all_data = merge_data_lastcost(all_data, df1_name="L_LPI",        # Main sales table
+        df1_product_col="CODPP",  # Product code in main table
+        df1_date_col="DATA",     # Sale date column
+        df2_name="T_Entradas",    # Cost data table
+        df2_product_col="PAI",    # Product code in cost table
+        df2_date_col="ULTIMA ENTRADA",  # Purchase date column
+        df2_cost_col="ULT CU R$",       # Cost column
+        new_col_name="ECUK",     # New column name for retrieved cost
+    default_value=999           # Default cost if no match is found
+)
+        # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
+    all_data = merge_data_lastcost(all_data, df1_name="MLK_Vendas",        # Main sales table
+        df1_product_col="CODPP",  # Product code in main table
+        df1_date_col="DATA DA VENDA",     # Sale date column
+        df2_name="T_Entradas",    # Cost data table
+        df2_product_col="PAI",    # Product code in cost table
+        df2_date_col="ULTIMA ENTRADA",  # Purchase date column
+        df2_cost_col="ULT CU R$",       # Cost column
+        new_col_name="ECU",     # New column name for retrieved cost
+    default_value=999           # Default cost if no match is found
+)
+
     all_data = merge_data2v(all_data, "MLA_Vendas", "ANOMES", "SKU", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
-    all_data = merge_data2v(all_data, "MLK_Vendas", "ANOMES", "SKU", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
  
     # Merge VENDEDOR with T_REPS for COMPCT
     all_data = merge_data(all_data, "O_NFCI", "Vendedor", "T_Reps", "Vendedor", "COMISSPCT", default_value=0)
@@ -222,7 +317,7 @@ def merge_all_data(all_data):
 
     # Ctas a Pagar e Receber
     all_data = merge_data(all_data, "O_CtasAPagar", "CATEGORIA", "T_CtasAPagarClass", "Categoria", "GrupoCtasAPagar", default_value='erro')
-    all_data = merge_data(all_data, "O_CtasARec", "CATEGORIA", "T_CtasAPagarClass", "Categoria", "GrupoCtasAPagar", default_value='erro')
+    #all_data = merge_data(all_data, "O_CtasARec", "CATEGORIA", "T_CtasARecClass", "Categoria", "GrupoCtasAPagar", default_value='erro')
 
     # CC
     all_data = merge_data(all_data, "O_CC", "CATEGORIA", "T_CCCats", "CC_Categoria Omie", "CC_Cat SG", default_value='erro')
@@ -234,10 +329,10 @@ def merge_all_data(all_data):
         if key == 'O_NFCI':
             # print_table_and_columns(all_data, "O_NFCI")
 
-            # Create column "C"
+            # Create column "C" (C)onta pra calculo (remessa não conta)
             df['C'] = 1 - df['REM_NF']
             
-            # Create column "B"
+            # Create column "B" (B)onificado
             df['B'] = df.apply(lambda row: 1 if row['OP'] == 'REMESSA DE PRODUTO' and row['C'] == 1 else 0, axis=1)
             
             # Create column ECT (ECU x QTD)
@@ -265,57 +360,137 @@ def merge_all_data(all_data):
             # Add the 'Valido' column directly
             df['VALIDO'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
             df['KAB'] = df.apply(lambda row: 1 if row['VALIDO'] == 1 and row['EMPRESA'] in ['K', 'A', 'B'] else 0, axis=1)
-            df['ECTK'] = df['ECU'] * df['QTD'] * df['KAB']
+            #print("#### DEBUG  ####")
+            #print("Unique values in EMPRESA:", df['EMPRESA'].unique())
+            #print("Unique values in VALIDO:", df['VALIDO'].unique())
+            #print("Unique values in KAB:", df['KAB'].unique())
+
+            df['ECTK'] = df['ECUK'] * df['QTD'] * df['KAB']
 
             # Add the 'TipoAnuncio' column directly from 'MLK_Vendas'
             if 'MLK_Vendas' in all_data:
+                print_table_head(all_data, "MLK_Vendas")
                 df = df.merge(
-                    all_data['MLK_Vendas'][['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO']],
+                    all_data['MLK_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
                     left_on='CÓDIGO PEDIDO',
-                    right_on='N.º DE VENDA_HYPERLINK',
+                    right_on='N.º DE VENDA',
                     how='left'
                 )
-                df['TipoAnuncio'] = df.apply(lambda row: row['TIPO DE ANÚNCIO'] if row['EMPRESA'] == 'K' and row['MP'] == 'ML' else None, axis=1)
-                df.drop(columns=['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO'], inplace=True)
+                df['TipoAnuncioK'] = df.apply(lambda row: 'ML' + row['TIPO DE ANÚNCIO'][:2] if pd.notna(row['TIPO DE ANÚNCIO']) and row['EMPRESA'] == 'K' and row['MP'] == 'ML' else None, axis=1)                    
+                df.drop(columns=['N.º DE VENDA', 'TIPO DE ANÚNCIO'], inplace=True)
 
-            # Add the 'TipoAnuncio' column for 'A' and lookup in 'MLA_Vendas'
-            print("BBBBBBB")
+            # Add the 'TipoAnuncio' column for 'ALWE' and lookup in 'MLA_Vendas'
             if 'MLA_Vendas' in all_data:
-                all_data['MLA_Vendas']['TipoAnuncio'] = all_data['MLA_Vendas']['TipoAnuncio'].astype(str)            
                 df = df.merge(
-                    all_data['MLA_Vendas'][['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO']],
+                    all_data['MLA_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
                     left_on='CÓDIGO PEDIDO',
-                    right_on='N.º DE VENDA_HYPERLINK',
+                    right_on='N.º DE VENDA',
                     how='left'
                 )
-                df['TipoAnuncio'] = df.apply(lambda row: row['TIPO DE ANÚNCIO'] if row['EMPRESA'] == 'A' and row['MP'] == 'ML' else row['TipoAnuncio'], axis=1)
-                df.drop(columns=['N.º DE VENDA_HYPERLINK', 'TIPO DE ANÚNCIO'], inplace=True)
+                df['TipoAnuncioA'] = df.apply(lambda row: 'ML' + row['TIPO DE ANÚNCIO'][:2] if pd.notna(row['TIPO DE ANÚNCIO']) and row['EMPRESA'] == 'A' and row['MP'] == 'ML' else None, axis=1)                    
+                df.drop(columns=['N.º DE VENDA', 'TIPO DE ANÚNCIO'], inplace=True)
 
-            # Add colum Compctmp (Comissão pct por Marketplace)
+            # Add the 'TipoAnuncio' column for 'Baby Trends' and lookup in 'MLB_Vendas'
+            if 'MLB_Vendas' in all_data:
+                df = df.merge(
+                    all_data['MLA_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
+                    left_on='CÓDIGO PEDIDO',
+                    right_on='N.º DE VENDA',
+                    how='left'
+                )
+                df['TipoAnuncioB'] = df.apply(lambda row: 'ML' + row['TIPO DE ANÚNCIO'][:2] if pd.notna(row['TIPO DE ANÚNCIO']) and row['EMPRESA'] == 'B' and row['MP'] == 'ML' else None, axis=1)                    
+                df.drop(columns=['N.º DE VENDA', 'TIPO DE ANÚNCIO'], inplace=True)
+            else:
+                # If 'MLB_Vendas' is not in all_data, create 'TipoAnuncioB' and fill with 'G' for EMPRESA == 'B' and MP == 'ML'
+                df['TipoAnuncioB'] = df.apply(lambda row: 'MLG' if row['EMPRESA'] == 'B' and row['MP'] == 'ML' else None, axis=1)
+
+            # Merge Tipo de AnnuncioK/A/B into MP. Ensure that we only process rows where MP == 'ML'
+            df['MP'] = df.apply(
+                lambda row: row['TipoAnuncioK'] if row['EMPRESA'] == 'K' and row['MP'] == 'ML' and pd.notna(row['TipoAnuncioK']) else
+                            row['TipoAnuncioA'] if row['EMPRESA'] == 'A' and row['MP'] == 'ML' and pd.notna(row['TipoAnuncioA']) else
+                            row['TipoAnuncioB'] if row['EMPRESA'] == 'B' and row['MP'] == 'ML' and pd.notna(row['TipoAnuncioB']) else row['MP'],
+                axis=1
+            )
+            # Drop the now redundant columns
+            df.drop(columns=['TipoAnuncioK', 'TipoAnuncioA', 'TipoAnuncioB'], inplace=True)            
+
+            # Add column Compctmp (Comissão pct por Marketplace)
             if 'T_RegrasMP' in all_data:
                 df = df.merge(
-                    all_data['T_RegrasMP'][['MPX', 'TARMP']],
+                    all_data['T_RegrasMP'][['MPX', 'TARMP', 'FFABAIXODE', 'FRETEFIX']],
                     left_on='MP',
                     right_on='MPX',
                     how='left'
                 )
-                df['Compctmp'] = df['TARMP']
-                df.drop(columns=['MPX', 'TARMP'], inplace=True)
+                # Assign marketplace commission percentage
+                df['ComissPctMp'] = df['TARMP']
 
-            # Add colum Compctml (Comissão pct pro ML Classico/Premium)
-                print("CCCCCCC")
-                df = df.merge(
-                    all_data['T_RegrasMP'][['MPX', 'TARMP']],
-                    left_on='TipoAnuncio',
-                    right_on='MPX',
-                    how='left'
+                # Create the ComPct column based on the condition
+                df['ComissPctVlr'] = df['VLRVENDA'] * df['ComissPctMp'] * -1
+
+                # Assign fixed shipping fee based on VLRVENDA threshold
+                df['FreteFixoVlr'] = df.apply(
+                    lambda row: -row['FRETEFIX'] if row['VLRVENDA'] < row['FFABAIXODE'] else 0,
+                    axis=1
                 )
-                df['Compctml'] = df['TARMP']
-                df.drop(columns=['MPX', 'TARMP'], inplace=True)
+                # Drop unnecessary columns
+                df.drop(columns=['MPX', 'TARMP', 'FFABAIXODE', 'FRETEFIX'], inplace=True)
 
-            # Create the ComPct column based on the condition
-            df['ComPct'] = df.apply(lambda row: row['Compctml'] if pd.notnull(row['Compctml']) else row['Compctmp'], axis=1)
-            df['Com'] = df['VLRVENDA'] * df['ComPct'] * df['KAB']
+            # Compute FretePaiVlr based on T_FretesMP
+            if 'T_FretesMP' in all_data:
+                df_fretesmp = all_data['T_FretesMP']
+
+                # Extract first two letters of MP
+                df['MP_2L'] = df['MP'].str[:2].str.upper()
+
+                # Function to lookup the freight cost
+                def get_frete_pai(row):
+                    codpp = row['CODPP']
+                    mp_col = row['MP_2L']
+
+                    # Ensure the column exists in T_FretesMP
+                    if mp_col not in df_fretesmp.columns:
+                        return 99  # If marketplace column doesn't exist, return 99
+
+                    # Try to find freight cost for the given CODPP
+                    match = df_fretesmp[df_fretesmp['CODPP'] == codpp]
+                    if not match.empty:
+                        return match[mp_col].values[0]  # Return corresponding marketplace freight cost
+
+                    # If CODPP not found, use generic cost for 'XXX'
+                    generic_match = df_fretesmp[df_fretesmp['CODPP'] == 'XXX']
+                    if not generic_match.empty:
+                        return generic_match[mp_col].values[0]
+
+                    return 99  # Default to 0 if no match found
+
+                # Apply lookup function
+                df['FreteProdVlr'] = df.apply(lambda row: -get_frete_pai(row), axis=1)
+
+                # Drop temporary column MP_2L
+                df.drop(columns=['MP_2L'], inplace=True)
+
+            # Create column Rebate for later use
+            df['Rebate'] = 0.0
+            df['Repasse'] = df['VLRVENDA'] + df['ComissPctVlr'] + df['FreteFixoVlr'] + df['FreteProdVlr'] + df['Rebate']
+            df['ImpLP'] = df.apply(
+                lambda row: -0.0925 * row['VLRVENDA'] if row['EMPRESA'] == 'K' else
+                            -0.14 * row['VLRVENDA'] if row['EMPRESA'] == 'A' else
+                            -0.10 * row['VLRVENDA'] if row['EMPRESA'] == 'B' else 0,
+                axis=1)
+            df['ImpICMS'] = df.apply(
+                lambda row: -0.18 * row['VLRVENDA'] if row['EMPRESA'] == 'K' else 0,
+                axis=1)
+            df['ImpTot'] = df['ImpLP'] + df['ImpICMS']
+
+            df['MargVlr'] = df.apply(
+                lambda row: 0 if row['EMPRESA'] == 'NC' else
+                            row['Repasse'] + row['ImpTot'] - row['ECTK'] - 1 - (0.01)*row['VLRVENDA'] if row['EMPRESA'] == 'K' else
+                            row['Repasse'] + row['ImpTot'] - 1.6 * row['ECTK'],
+                axis=1)
+
+            # Create column VerbaVLR (VerbaPCT x TotalNF)
+            df['MargPct'] = df['MargVlr'] / df['VLRVENDA']
 
         elif key == 'MLA_Vendas':
             # Add the 'VALIDO' column directly
@@ -336,7 +511,7 @@ def merge_all_data(all_data):
             df['ImpostoT'] =  df['Imposto1'] + df['Imposto2']
 
             # Create column MargCVlr
-            df['MARGVLR'] = df['REPASSE'] - df['ImpostoT'] - df['ECTK'] - (1)
+            df['MARGVLR'] = df['REPASSE'] - df['ImpostoT'] - df['ECTK'] - (1) -(.01)*df['VLRTOTALPSKU']
             df['MARGPCT'] = df['MARGVLR'] / df['VLRTOTALPSKU']
 
             cols_to_drop = ['CODPF_x', 'CODPF_y', 'MLSTATUS']
@@ -352,15 +527,22 @@ def merge_all_data(all_data):
             # Step 5: Classify 'DIAS ATRASO' using the classification table from all_data['T_CtasARecClass']
             df_ctas_a_rec_class = all_data['T_CtasARecClass']
 
-            # Merge based on the 'DIAS ATRASO' column and classification table
-            df = pd.merge(df, df_ctas_a_rec_class, how='left', left_on='DIAS ATRASO', right_on='DEXDIAS')
-        
-            # Apply the range condition for 'DIAS ATRASO' to determine classification
-            df['CLASSIFICACAO'] = df.apply(lambda row: row['STATUS ATRASO'] if row['DEXDIAS'] <= row['DIAS ATRASO'] <= row['DEXDIAS'] else None, axis=1)
+             # Step 6: Perform the range-based classification
+            def classify_dias_atraso(row):
+                # Find the classification based on DIAS ATRASO falling within DEXDIAS and ATEXDIAS range
+                match = df_ctas_a_rec_class[
+                    (df_ctas_a_rec_class['DEXDIAS'] <= row['DIAS ATRASO']) &
+                    (row['DIAS ATRASO'] <= df_ctas_a_rec_class['ATEXDIAS'])
+                ]
+                return match['STATUS ATRASO'].iloc[0] if not match.empty else None
+            
+            # Apply the classification function to each row
+            df['CLASSIFICACAO'] = df.apply(classify_dias_atraso, axis=1)
         
             # Filter out rows where the classification was not within the proper range
-            df = df.dropna(subset=['CLASSIFICACAO'])
+            #df = df.dropna(subset=['CLASSIFICACAO'])
 
+        df = clean_dataframes({key: df})[key]  # Pass only the relevant table for modification
         # Update the dataframe in all_data
         all_data[key] = df
 
@@ -447,6 +629,74 @@ def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2
         all_data[df1_name] = merged_df
     return all_data
 
+def merge_data_lastcost(all_data, df1_name, df1_product_col, df1_date_col, df2_name, df2_product_col, df2_date_col, df2_cost_col, new_col_name, default_value=None):
+    """
+    Merge df1 (sales table) with df2 (cost table) to get the last recorded cost before the sale date.
+
+    Parameters:
+    - all_data (dict): Dictionary containing all datasets.
+    - df1_name (str): Key for the main table (sales) in all_data.
+    - df1_product_col (str): Column name for the product code in the main table.
+    - df1_date_col (str): Column name for the sale date in the main table.
+    - df2_name (str): Key for the cost table in all_data.
+    - df2_product_col (str): Column name for the product code in the cost table.
+    - df2_date_col (str): Column name for the purchase date in the cost table.
+    - df2_cost_col (str): Column name for the cost value in the cost table.
+    - new_col_name (str): Name of the new column to store the retrieved cost.
+    - default_value (optional): Default value to use if no match is found.
+
+    Returns:
+    - all_data (dict): Updated dictionary with the main table modified to include last cost.
+    """
+
+    # Standardize column names to uppercase
+    df1_product_col = df1_product_col.upper()
+    df1_date_col = df1_date_col.upper()
+    df2_product_col = df2_product_col.upper()
+    df2_date_col = df2_date_col.upper()
+    df2_cost_col = df2_cost_col.upper()
+    new_col_name = new_col_name.upper()
+
+    if df1_name in all_data and df2_name in all_data:
+        df1 = all_data[df1_name]
+        df2 = all_data[df2_name]
+
+        # Standardize column names
+        df1.columns = [col.upper() for col in df1.columns]
+        df2.columns = [col.upper() for col in df2.columns]
+
+        # Check if required columns exist
+        missing_cols = [col for col in [df1_product_col, df1_date_col] if col not in df1.columns] + \
+                       [col for col in [df2_product_col, df2_date_col, df2_cost_col] if col not in df2.columns]
+        if missing_cols:
+            raise KeyError(f"Missing columns in dataframes: {missing_cols}")
+
+        # Convert dates to datetime format
+        df1[df1_date_col] = pd.to_datetime(df1[df1_date_col])
+        df2[df2_date_col] = pd.to_datetime(df2[df2_date_col])
+
+        # Sort df2 (cost table) by product and date descending
+        df2 = df2.sort_values(by=[df2_product_col, df2_date_col], ascending=[True, False])
+
+        # Merge based on product and latest entry before sale date
+        def get_last_cost(row):
+            product = row[df1_product_col]
+            sale_date = row[df1_date_col]
+
+            # Filter cost table for matching product and valid entry dates
+            valid_costs = df2[(df2[df2_product_col] == product) & (df2[df2_date_col] <= sale_date)]
+
+            # Return the most recent cost before the sale date
+            return valid_costs[df2_cost_col].iloc[0] if not valid_costs.empty else default_value
+
+        df1[new_col_name] = df1.apply(get_last_cost, axis=1)
+
+        # Update the dataset in all_data dictionary
+        all_data[df1_name] = df1
+
+    return all_data
+
+
 def compute_NFCI_ANOMES(all_data):
     for key, df in all_data.items():
         # Add the ANOMES column to O_NFCI
@@ -531,60 +781,91 @@ def load_inventory_data(file_path):
 
 def print_all_tables_and_columns(all_data):
     for table_name, df in all_data.items():
-        print(f"Table: {table_name}")
-        print("Columns:", df.columns.tolist())
+        #print(f"Table: {table_name}")
+        #print("Columns:", df.columns.tolist())
         print("-" * 50)
 
 def print_table_and_columns(all_data, table_name):
     if table_name in all_data:
-        print(f"Table: {table_name}")
-        print("Columns:", all_data[table_name].columns.tolist())
+        #print(f"Table: {table_name}")
+        #print("Columns:", all_data[table_name].columns.tolist())
         print("-" * 50)
     else:
         print(f"Table '{table_name}' not found in the dataset.")
 
-def excel_format(output_path, column_format_dict):
-    print("Formatting all sheets")
-    header_style = NamedStyle(name="header_style")
-    header_style.font = Font(bold=True)
-    header_style.fill = PatternFill("solid", fgColor="6ac5fe")  # Light blue background color
-    header_style.alignment = Alignment(horizontal="center", vertical="center")
+def print_table_head(all_data, table_name):
+    """
+    Print the column names and the first 10 rows of a DataFrame.
 
-    workbook = load_workbook(output_path)
-    for sheet_name in workbook.sheetnames:
-        worksheet = workbook[sheet_name]
-        
-        # Apply header style
-        for col_idx in range(1, worksheet.max_column + 1):
-            cell = worksheet.cell(row=1, column=col_idx)
-            cell.style = header_style
+    Parameters:
+    df (pandas.DataFrame): The DataFrame to print.
+    """
+    #print("Columns:", all_data[table_name].columns.tolist())
+    print("\nTop 10 Rows:")
+    #print(all_data[table_name].head(10))
 
-        if sheet_name in column_format_dict:
-            formats = column_format_dict[sheet_name]
-            for col_name, col_format in formats.items():
-                # Find the column index based on header name
-                for col_idx, cell in enumerate(worksheet[1], start=1):
-                    if cell.value == col_name:
-                        break
-                else:
-                    continue  # Skip if column name is not found
+def excel_format(output_file, column_format_dict):
+    # Load the workbook with macros
+    wb = load_workbook(output_file, keep_vba=True)
 
-                # Apply the format to the entire column
-                for row_idx in range(2, worksheet.max_row + 1):  # Start from the second row to avoid header
-                    cell = worksheet.cell(row=row_idx, column=col_idx)
-                    cell.number_format = col_format
+    # Check if the style already exists
+    if "header_style" not in wb.named_styles:
+        header_style = NamedStyle(name="header_style")
+        header_style.font = Font(bold=True)
+        header_style.alignment = Alignment(horizontal="center", vertical="center")
+        header_style.border = Border(
+            left=Side(style="thin"),
+            right=Side(style="thin"),
+            top=Side(style="thin"),
+            bottom=Side(style="thin")
+        )
+        wb.add_named_style(header_style)  # Only add if it doesn't exist
 
-    workbook.save(output_path)
-    print(f"All sheets formatted")
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        print(f"✅ Formatting sheet: {sheet_name}")
+
+        # Apply header style safely
+        for cell in ws[1]:  # First row (header)
+            cell.style = "header_style"
+
+    # **CRITICAL**: Save the workbook while keeping macros
+    try:
+        #base_name, ext = os.path.splitext(output_file)
+        #versioned_output_file = f"{base_name}_01{ext}"
+        #wb.save(versioned_output_file)
+        wb.save(output_file)
+        print(f"✅ Successfully formatted and saved {output_file}")
+    except Exception as e:
+        print(f"❌ Error saving {output_file}: {e}")
 
 def excel_autofilters(output_path):
-    print("Adding auto-filters to all sheets")
-    workbook = load_workbook(output_path)
+    print(f"✅ Adding auto-filters to {output_path}")
+    
+    # Open workbook while preserving macros
+    workbook = load_workbook(output_path, keep_vba=True)  
+
     for sheetname in workbook.sheetnames:
         worksheet = workbook[sheetname]
-        worksheet.auto_filter.ref = worksheet.dimensions
-    workbook.save(output_path)
-    print("Added auto-filters to all sheets")
+        print(f"🔹 Processing sheet: {sheetname}")
+
+        # Check if the worksheet has any data
+        if worksheet.max_row > 1 and worksheet.max_column > 1:
+            data_range = worksheet.dimensions
+            if data_range and ":" in data_range:  # Ensure valid range
+                worksheet.auto_filter.ref = data_range
+                print(f"✅ Auto-filter applied to {sheetname}: {data_range}")
+            else:
+                print(f"⚠️ Skipping {sheetname}: No valid data range found.")
+        else:
+            print(f"⚠️ Skipping {sheetname}: Sheet is empty or has only headers.")
+
+    # Save changes while keeping macros
+    try:
+        workbook.save(output_path)
+        print(f"✅ Auto-filters added and saved: {output_path}")
+    except Exception as e:
+        print(f"❌ Error saving {output_path}: {e}")
 
 # Define the audit function
 def perform_audit(df, client_name):
@@ -668,7 +949,7 @@ def calculate_realized_cost(inventory_df):
             'Quantity': row['Quantity'],
             'Custo Total Unit': row['Custo Total Unit']
         })
-    print("Purchase List:", purchase_list)  # Debug print
+    #print("Purchase List:", purchase_list)  # Debug print
 
     # Iterate through the sales (V) and populate the realized cost details
     for index, row in inventory_df[inventory_df['CV'] == 'V'].iterrows():
@@ -707,10 +988,8 @@ def calculate_realized_cost(inventory_df):
                 inventory_df.at[purchase_index, 'CMV Unit E'] = purchase['Custo Total Unit']
                 inventory_df.at[purchase_index, 'CMV Mov E'] = purchase['Quantity'] * purchase['Custo Total Unit']
 
-    print(inventory_df)  # Debug print
+    #print(inventory_df)  # Debug print
     return inventory_df
-
-
 
 # Function to perform the inventory audit
 def perform_invaudit(o_nfci_df, l_lpi_df, client_name):
@@ -749,8 +1028,9 @@ def main():
     }
 
     all_data = {}
+
     for key, pattern in file_patterns.items():
-        recent_data = load_recent_data(base_dir, pattern, start_date, end_date)
+        recent_data = load_recent_data(base_dir, pattern)
         print(f"{key} data shape: {recent_data.shape}")  # Debug print
 
         # Ensure 'N.º de venda' is treated as string if the column exists
@@ -763,7 +1043,7 @@ def main():
 
     # Load static data
     static_tables = ['T_CondPagto.xlsx', 'T_Fretes.xlsx', 'T_GruposCli.xlsx', 'T_MP.xlsx', 
-                     'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx','T_Vol.xlsx', 'T_ProdF.xlsx', 
+                     'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx', 'T_Vol.xlsx', 'T_ProdF.xlsx', 
                      'T_ProdP.xlsx', 'T_Entradas.xlsx', 'T_FretesMP.xlsx', 'T_MLStatus.xlsx', 'T_CtasAPagarClass.xlsx',
                      'T_CtasARecClass.xlsx', 'T_CCCats.xlsx']
     static_data_dict = {table.replace('.xlsx', ''): load_static_data(static_dir, table) for table in static_tables}
@@ -773,9 +1053,9 @@ def main():
         print(f"Static data {key} shape: {df.shape}")  # Debug print
     
     inventory_data = preprocess_inventory_data(inventory_file_path)
- 
+
     # Add static data to all_data dictionary
-    all_data.update(static_data_dict) 
+    all_data.update(static_data_dict)
     all_data.update(inventory_data)
     
     all_data = rename_columns(all_data, column_rename_dict)
@@ -787,39 +1067,24 @@ def main():
     all_data = perform_all_audits(all_data)
     print(f"Audit completed for clients: {', '.join(audit_client_names)}")
 
-    # Perform innventory audits for the specified clients
+    # Perform inventory audits for the specified clients
     all_data = perform_all_invaudits(all_data)
     print(f"INVENTORY Audit completed for clients: {', '.join(audit_client_names)}")
 
-    # Save all data to one Excel file with multiple sheets
-    output_path = os.path.join(base_dir, 'clean', 'merged_data.xlsx')
-    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-        for key, df in all_data.items():
-            df.to_excel(writer, sheet_name=key, index=False)
-            print(f"Added {key} data to {output_path} in sheet {key}")  # Debug print
+   # Write to the existing template (wb_template)
+    for key, df in all_data.items():
+        ws = wb_template.create_sheet(title=key)
+        for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
+            for c_idx, value in enumerate(row, 1):
+                ws.cell(row=r_idx, column=c_idx, value=value)
+        print(f"✅ Added {key} data to {output_file} in sheet {key}")  # Debug print
 
-    print(f"All merged data saved to {output_path}")
+    # Save the modified workbook
+    wb_template.save(output_file)
+    print(f"✅ All merged data saved to {output_file}")
 
-    excel_format(output_path, column_format_dict)
-    excel_autofilters(output_path)
+    excel_format(output_file, column_format_dict)
+    excel_autofilters(output_file)
 
-# Main script with date input
 if __name__ == "__main__":
-    user_input = input("Enter the year and month to process (yyyy_mm) or press Enter to process all data: ").strip()
-
-    if user_input:
-        try:
-            year, month = map(int, user_input.split('_'))
-            start_date = datetime(year, month, 1)
-            end_date = start_date + MonthEnd(0)
-            print(f"Processing data for specified month: {start_date.strftime('%Y-%m')}...")
-        except ValueError:
-            print("Invalid input format. Please use yyyy_mm.")
-            exit(1)
-    else:
-        print("No date specified. Processing data using default date range...")
-
-    # Call the processing function with the (possibly updated) global variables
-    print(f"Processing all data from {start_date} to {end_date}...")
-    # Original processing logic goes here
     main()
