@@ -1,0 +1,124 @@
+{
+    "nodes": [
+        {
+            "parameters": {
+                "updates": ["message"]
+            },
+            "name": "Telegram Trigger",
+            "type": "n8n-nodes-base.telegramTrigger",
+            "typeVersion": 1,
+            "position": [200, 300]
+        },
+        {
+            "parameters": {
+                "requestMethod": "GET",
+                "url": "https://v3.football.api-sports.io/fixtures",
+                "queryParametersUi": {
+                    "parameter": [
+                        {"name": "team", "value": "{{$json[\"message\"][\"text\"]}}"},
+                        {"name": "last", "value": "5"}
+                    ]
+                },
+                "options": {
+                    "headers": {
+                        "x-apisports-key": "YOUR_API_KEY"
+                    }
+                }
+            },
+            "name": "Get Last Matches Team A",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 1,
+            "position": [400, 200]
+        },
+        {
+            "parameters": {
+                "requestMethod": "GET",
+                "url": "https://v3.football.api-sports.io/fixtures",
+                "queryParametersUi": {
+                    "parameter": [
+                        {"name": "team", "value": "{{$json[\"message\"][\"text\"]}}"},
+                        {"name": "last", "value": "5"}
+                    ]
+                },
+                "options": {
+                    "headers": {
+                        "x-apisports-key": "YOUR_API_KEY"
+                    }
+                }
+            },
+            "name": "Get Last Matches Team B",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 1,
+            "position": [400, 400]
+        },
+        {
+            "parameters": {
+                "requestMethod": "GET",
+                "url": "https://v3.football.api-sports.io/headtohead",
+                "queryParametersUi": {
+                    "parameter": [
+                        {"name": "h2h", "value": "{{$json[\"message\"][\"text\"]}}"},
+                        {"name": "last", "value": "3"}
+                    ]
+                },
+                "options": {
+                    "headers": {
+                        "x-apisports-key": "YOUR_API_KEY"
+                    }
+                }
+            },
+            "name": "Get Last H2H Matches",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 1,
+            "position": [600, 300]
+        },
+        {
+            "parameters": {
+                "model": "gpt-4",
+                "prompt": "Analise os últimos jogos dos times A e B e gere um comentário esportivo dinâmico",
+                "temperature": 0.7,
+                "max_tokens": 300
+            },
+            "name": "AI Analysis",
+            "type": "n8n-nodes-base.chatGPT",
+            "typeVersion": 1,
+            "position": [800, 300]
+        },
+        {
+            "parameters": {
+                "chatId": "{{$json[\"message\"][\"chat\"][\"id\"]}}",
+                "message": "{{$json[\"message\"][\"text\"]}}"
+            },
+            "name": "Send Telegram Message",
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1,
+            "position": [1000, 300]
+        }
+    ],
+    "connections": {
+        "Telegram Trigger": {
+            "main": [
+                [{"node": "Get Last Matches Team A", "type": "main", "index": 0}],
+                [{"node": "Get Last Matches Team B", "type": "main", "index": 0}]
+            ]
+        },
+        "Get Last Matches Team A": {
+            "main": [
+                [{"node": "Get Last H2H Matches", "type": "main", "index": 0}]
+            ]
+        },
+        "Get Last H2H Matches": {
+            "main": [
+                [{"node": "AI Analysis", "type": "main", "index": 0}]
+            ]
+        },
+        "AI Analysis": {
+            "main": [
+                [{"node": "Send Telegram Message", "type": "main", "index": 0}]
+            ]
+        }
+    },
+    "settings": {},
+    "name": "Football Match Analysis",
+    "active": false
+}
