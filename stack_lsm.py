@@ -7,8 +7,8 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 
 # Global variables
 timeframe = 6  # Default: Last 6 months
-ano_x = 2025
-mes_x = 1
+ano_x = 2024
+mes_x = 12
 
 # Base directory
 base_dir = "/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/clean"
