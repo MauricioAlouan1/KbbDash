@@ -9,6 +9,8 @@ import os
 import openpyxl
 import pandas as pd
 import numpy as np
+import chardet
+
 
 # Define the potential base directories
 path_options = [
@@ -94,6 +96,71 @@ def process_L_LPI(data):
         if col in data.columns:
             data[col] = data[col].apply(convert_currency_to_float)
     return data
+
+def detect_encoding_and_delimiter(file_path):
+    """Detect the file encoding and delimiter automatically."""
+    with open(file_path, "rb") as f:
+        result = chardet.detect(f.read(50000))  # Analyze first 50,000 bytes
+    encoding = result["encoding"]
+
+    # Try detecting the delimiter
+    with open(file_path, "r", encoding=encoding) as f:
+        first_line = f.readline()
+        if "," in first_line:
+            delimiter = ","
+        elif ";" in first_line:
+            delimiter = ";"
+        elif "\t" in first_line:
+            delimiter = "\t"
+        else:
+            delimiter = ","
+
+    print(f"✅ Detected encoding: {encoding}, Delimiter: '{delimiter}'")
+    return encoding, delimiter
+
+def process_MGK_Pacotes_CSV(file_path):
+    """Process MGK_Pacotes CSV files by handling encoding, delimiter, and data formatting."""
+
+    # Detect encoding and delimiter
+    encoding, delimiter = detect_encoding_and_delimiter(file_path)
+
+    # Load CSV with detected encoding and delimiter
+    data = pd.read_csv(file_path, encoding=encoding, delimiter=delimiter)
+
+    # Convert date column
+    if "Data do Pacote" in data.columns:
+        data["Data do Pacote"] = pd.to_datetime(data["Data do Pacote"], errors="coerce", dayfirst=True)
+
+    # ✅ Expand list of numeric fields
+    numeric_columns = [
+        "Valor total do Pacote", "Valor total (Forma de Pagamento 1)", "Valor total (Forma de Pagamento 2)",
+        "Valor total dos Produtos do pacote", "Desconto totais do pacote", "Frete total do pacote"
+    ]
+    
+    # ✅ Ensure correct numeric formatting for all specified columns
+    for col in numeric_columns:
+        if col in data.columns:
+            data[col] = data[col].replace(r"[R$\s]", "", regex=True).replace(",", ".", regex=True)
+            data[col] = pd.to_numeric(data[col], errors="coerce")  # Convert to float
+
+    # Convert any other numeric-looking columns
+    for col in data.columns:
+        if data[col].dtype == "object":  # If column is stored as text
+            try:
+                data[col] = pd.to_numeric(data[col], errors="ignore")  # Convert if possible
+            except:
+                pass  # Ignore if not convertible
+
+    # Clean text columns
+    text_columns = ["Número do pedido", "Número do pacote", "Status pacote no momento que o relatório foi solicitado",
+                    "Forma de pagamento 1", "Nome do cliente", "CPF/CNPJ do Cliente", "Cidade", "Estado"]
+    for col in text_columns:
+        if col in data.columns:
+            data[col] = data[col].astype(str).str.strip()
+
+    print("✅ MGK_Pacotes CSV processing completed with all numeric fields correctly formatted.")
+    return data
+
 
 def process_MLK_Vendas(data):
     """Process MLK_Vendas files."""
@@ -331,6 +398,39 @@ def check_and_process_files():
                             pass
                             # print(f"Skipped {file}, already processed.")
 
+def check_and_process_files_csv():
+    """Process all CSV files from RAW folder and save as cleaned XLSX files."""
+    raw_dir = os.path.join(base_dir, 'raw')
+    clean_dir = os.path.join(base_dir, 'clean')
+
+    processing_map_csv = {
+        'MGK_Pacotes': process_MGK_Pacotes_CSV
+    }
+
+    for subdir, _, files in os.walk(raw_dir):
+        for file in files:
+            if file.endswith('.csv') and not file.startswith('~$'):  # Ignore temp files
+                for key, processor in processing_map_csv.items():
+                    if key in file:
+                        raw_filepath = os.path.join(subdir, file)
+                        clean_subdir = os.path.join(clean_dir, os.path.basename(subdir))
+                        clean_filepath = os.path.join(clean_subdir, file.replace('.csv', '_clean.xlsx'))
+
+                        raw_mtime = os.path.getmtime(raw_filepath)
+                        clean_mtime = os.path.getmtime(clean_filepath) if os.path.exists(clean_filepath) else 0
+
+                        if not os.path.exists(clean_filepath) or raw_mtime > clean_mtime:
+                            print(f"📂 Processing CSV: {file}...")
+                            try:
+                                data = processor(raw_filepath)  # Process CSV file
+                                save_cleaned_data(data, clean_filepath)  # Save as XLSX
+                            except Exception as e:
+                                print(f"❌ Error processing {file}: {e}")
+                        else:
+                            pass
+                            # print(f"Skipped {file}, already processed.")
+
+
 def extract_hyperlinks_data(filepath, header_name):
     """Extract data and create a new column for hyperlinks for a specific header."""
     wb = openpyxl.load_workbook(filepath, data_only=False)
@@ -369,3 +469,4 @@ def save_cleaned_data(data, output_filepath):
 
 if __name__ == "__main__":
     check_and_process_files()
+    check_and_process_files_csv()

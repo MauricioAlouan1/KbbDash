@@ -50,6 +50,7 @@ else:
     print("None of the specified directories exist.")
     base_dir = None  # Or set a default path if appropriate
 print("Base directory set to:", base_dir)
+
 static_dir = os.path.join(base_dir, 'Tables')
 inventory_file_path = os.path.join(static_dir, 'R_EstoqComp.xlsx')  # Update to the correct path if needed
 template_file = os.path.join(base_dir, "Template", "PivotTemplate.xlsm")
