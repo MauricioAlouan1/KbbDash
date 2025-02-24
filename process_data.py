@@ -161,6 +161,58 @@ def process_MGK_Pacotes_CSV(file_path):
     print("✅ MGK_Pacotes CSV processing completed with all numeric fields correctly formatted.")
     return data
 
+def process_MLK_ExtLib_CSV(file_path):
+    """Process MLK_ExtLib CSV files by handling encoding, delimiter, numeric conversion, and timezone issues."""
+
+    # Detect encoding and delimiter
+    encoding, delimiter = detect_encoding_and_delimiter(file_path)
+
+    # Fallback to UTF-8 if ASCII is detected (to avoid errors)
+    if encoding.lower() == "ascii":
+        encoding = "utf-8"
+
+    # Load CSV with detected encoding and delimiter
+    data = pd.read_csv(file_path, encoding=encoding, delimiter=delimiter)
+
+    # ✅ Convert date column & ensure timezone-unaware timestamps
+    if "DATE" in data.columns:
+        data["DATE"] = pd.to_datetime(data["DATE"], errors="coerce", dayfirst=True)
+        data["DATE"] = data["DATE"].dt.tz_localize(None)  # Remove timezone
+
+    # ✅ Expand list of numeric fields
+    numeric_columns = [
+        "NET_CREDIT_AMOUNT", "NET_DEBIT_AMOUNT", "GROSS_AMOUNT",
+        "SELLER_AMOUNT", "MP_FEE_AMOUNT", "FINANCING_FEE_AMOUNT", "SHIPPING_FEE_AMOUNT", "TAXES_AMOUNT",
+        "COUPON_AMOUNT", "TAX_AMOUNT_TELCO", "EFFECTIVE_COUPON_AMOUNT"
+    ]
+
+    # ✅ Ensure correct numeric formatting for all specified columns
+    for col in numeric_columns:
+        if col in data.columns:
+            data[col] = data[col].replace(r"[R$\s]", "", regex=True).replace(",", ".", regex=True)
+            data[col] = pd.to_numeric(data[col], errors="coerce")  # Convert to float
+
+    print("✅ MLK_ExtLib CSV processing completed successfully.")
+    return data
+
+def process_MGK_Extrato(data):
+    """Process MGK_Extrato files by removing the last row (totals) while keeping all formatting."""
+    
+    # Check if there is an empty row before the totals
+    empty_row_index = data.index[data.isnull().all(axis=1)]
+    if len(empty_row_index) > 0:
+        last_data_row = empty_row_index[0]  # First empty row index
+        data = data.iloc[:last_data_row]  # Keep everything before the empty row
+
+    print("✅ MGK_Extrato processing completed. Totals row removed.")
+    return data
+
+def process_SHK_Extrato(data):
+    """Process O_Estoq files: adapt this function to meet specific requirements."""
+    # Example: Remove rows where 'Código do Produto' is empty
+    data = data[data['Data'].notna()]
+    return data
+
 
 def process_MLK_Vendas(data):
     """Process MLK_Vendas files."""
@@ -372,7 +424,9 @@ def check_and_process_files():
         'O_Estoq': (process_O_Estoq, "Código do Produto", False),
         'MLK_Vendas': (process_MLK_Vendas, "N.º de venda", True),  # Enable hyperlink extraction for MLK_Vendas
         'MLA_Vendas': (process_MLK_Vendas, "N.º de venda", True),  # New entry, same process as MLK_Vendas
-        'T_EstTrans': (process_T_EstTrans, "CodProd", False)
+        'T_EstTrans': (process_T_EstTrans, "CodProd", False),
+        "MGK_Extrato": (process_MGK_Extrato, "Relatório solicitado em: Data/Hora", False),
+        "SHK_Extrato": (process_SHK_Extrato, "Data", False)
     }
     for subdir, dirs, files in os.walk(raw_dir):
         for file in files:
@@ -404,7 +458,8 @@ def check_and_process_files_csv():
     clean_dir = os.path.join(base_dir, 'clean')
 
     processing_map_csv = {
-        'MGK_Pacotes': process_MGK_Pacotes_CSV
+        'MGK_Pacotes': process_MGK_Pacotes_CSV,
+        'MLK_ExtLib': process_MLK_ExtLib_CSV
     }
 
     for subdir, _, files in os.walk(raw_dir):
