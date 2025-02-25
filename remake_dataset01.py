@@ -122,12 +122,15 @@ column_format_dict = {
     },
     'L_LPI':{
         'VLRVENDA': '#,##0.00',        
+        'DESCONTO PEDIDO SELLER': '#,##0.00',        
+        'FRETE SELLER': '#,##0.00',        
         'ECUK': '#,##0.00',
         'ECTK': '#,##0.00',
         'ComissPctMp': '0.0%',
-        'ComissVlr': '#,##0.00',
+        'ComissPctVlr': '#,##0.00',
         'FreteFixoVlr': '#,##0.00',
-        'Repasse': '#,##0.00',
+        'FreteProdVlr': '#,##0.00',
+        'REPASSE': '#,##0.00',
         'ImpLP': '#,##0.00',
         'ImpICMS': '#,##0.00',
         'ImpTot': '#,##0.00',
@@ -135,16 +138,39 @@ column_format_dict = {
         'MargPct': '0.0%',
     },
     'MLK_Vendas':{
-        'MARGVLR': '#,##0.00',
-        'MARGPCT': '0.00%',
+        'VLRTOTALPSKU': '#,##0.00',
+        'RECEITAENVIO': '#,##0.00',
+        'TARIFAVENDA': '#,##0.00',
+        'TARIFAENVIO': '#,##0.00',
+        'CANCELAMENTOS': '#,##0.00',
+        'REPASSE': '#,##0.00',
         'ECU': '#,##0.00',
         'ECTK': '#,##0.00',
         'Imposto1': '#,##0.00',
         'Imposto2': '#,##0.00',
         'ImpostoT': '#,##0.00',
+        'MARGVLR': '#,##0.00',
+        'MARGPCT': '0.00%',
     },
-
-    # Add dictionaries for other dataframes...
+    'O_CC': {
+        'DATA': 'DD-MMM-YY',  
+        'VALOR (R$)': '#,##0.00',
+    },
+    'O_CtasAPagar': {
+        'PREVISÃO': 'DD-MMM-YY',  
+        'EMISSÃO': 'DD-MMM-YY',  
+        'VENCIMENTO': 'DD-MMM-YY',  
+        'REGISTRO': 'DD-MMM-YY',  
+        'A PAGAR': '#,##0.00',
+    },
+    'O_CtasARec': {
+        'PREVISÃO': 'DD-MMM-YY',  
+        'EMISSÃO': 'DD-MMM-YY',  
+        'VENCIMENTO': 'DD-MMM-YY',  
+        'REGISTRO': 'DD-MMM-YY',  
+        'A RECEBER': '#,##0.00',
+        'DATA BASE': 'DD-MMM-YY',  
+    },
 }
 
 rows_todrop = {
@@ -157,7 +183,50 @@ cols_todrop = {
     'O_NFCI': {
         'PROJETO': 'd',
         'C': 'd',
-    }
+    },
+    'MLK_Vendas':{
+        'RECEITA POR ACRÉSCIMO NO PREÇO (PAGO PELO COMPRADOR)': 'd',
+        'TAXA DE PARCELAMENTO EQUIVALENTE AO ACRÉSCIMO': 'd',
+        'ENDEREÇO': 'd',
+        'ENDEREÇO01': 'd',
+        'CIDADE': 'd',
+        'ESTADO': 'd',
+        'CEP': 'd',
+    },
+    'O_CC': {
+        'SALDO (R$)': 'd',
+    },
+    'O_CtasAPagar': {
+        'MINHA EMPRESA (NOME FANTASIA)': 'd',
+        'MINHA EMPRESA (RAZÃO SOCIAL)': 'd',
+        'MINHA EMPRESA (CNPJ)': 'd',
+        'ORÇAMENTO': 'd',
+        'VALOR DA CONTA': 'd',
+        'VALOR PIS': 'd',
+        'VALOR COFINS': 'd',
+        'VALOR CSLL': 'd',
+        'VALOR IR': 'd',
+        'VALOR ISS': 'd',
+        'VALOR INSS': 'd',
+        'VALOR LÍQUIDO': 'd',
+        'VALOR PAGO': 'd',
+    },
+    'O_CtasARec': {
+        'MINHA EMPRESA (NOME FANTASIA)': 'd',
+        'MINHA EMPRESA (RAZÃO SOCIAL)': 'd',
+        'MINHA EMPRESA (CNPJ)': 'd',
+        'ORÇAMENTO': 'd',
+        'VALOR DA CONTA': 'd',
+        'VALOR PIS': 'd',
+        'VALOR COFINS': 'd',
+        'VALOR CSLL': 'd',
+        'VALOR IR': 'd',
+        'VALOR ISS': 'd',
+        'VALOR INSS': 'd',
+        'VALOR LÍQUIDO': 'd',
+        'RECEBIDO': 'd',
+    },
+
 }
 
 
@@ -359,6 +428,7 @@ def merge_all_data(all_data):
             cols_to_drop = ['PREÇO', 'PREÇO TOTAL', 'DESCONTO ITEM', 'DESCONTO TOTAL']
             df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
             # Add the 'Valido' column directly
+            df["MP2"] = df["MP"].str[:2]
             df['VALIDO'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
             df['KAB'] = df.apply(lambda row: 1 if row['VALIDO'] == 1 and row['EMPRESA'] in ['K', 'A', 'B'] else 0, axis=1)
             #print("#### DEBUG  ####")
@@ -473,7 +543,7 @@ def merge_all_data(all_data):
 
             # Create column Rebate for later use
             df['Rebate'] = 0.0
-            df['Repasse'] = df['VLRVENDA'] + df['ComissPctVlr'] + df['FreteFixoVlr'] + df['FreteProdVlr'] + df['Rebate']
+            df['REPASSE'] = df['VLRVENDA'] + df['ComissPctVlr'] + df['FreteFixoVlr'] + df['FreteProdVlr'] + df['Rebate']
             df['ImpLP'] = df.apply(
                 lambda row: -0.0925 * row['VLRVENDA'] if row['EMPRESA'] == 'K' else
                             -0.14 * row['VLRVENDA'] if row['EMPRESA'] == 'A' else
@@ -486,8 +556,8 @@ def merge_all_data(all_data):
 
             df['MargVlr'] = df.apply(
                 lambda row: 0 if row['EMPRESA'] == 'NC' else
-                            row['Repasse'] + row['ImpTot'] - row['ECTK'] - 1 - (0.01)*row['VLRVENDA'] if row['EMPRESA'] == 'K' else
-                            row['Repasse'] + row['ImpTot'] - 1.6 * row['ECTK'],
+                            row['REPASSE'] + row['ImpTot'] - row['ECTK'] - 1 - (0.01)*row['VLRVENDA'] if row['EMPRESA'] == 'K' else
+                            row['REPASSE'] + row['ImpTot'] - 1.6 * row['ECTK'],
                 axis=1)
 
             # Create column VerbaVLR (VerbaPCT x TotalNF)
@@ -809,7 +879,7 @@ def excel_format(output_file, column_format_dict):
     # Load the workbook with macros
     wb = load_workbook(output_file, keep_vba=True)
 
-    # Check if the style already exists
+    # Predefine header style if not already added
     if "header_style" not in wb.named_styles:
         header_style = NamedStyle(name="header_style")
         header_style.font = Font(bold=True)
@@ -820,21 +890,33 @@ def excel_format(output_file, column_format_dict):
             top=Side(style="thin"),
             bottom=Side(style="thin")
         )
-        wb.add_named_style(header_style)  # Only add if it doesn't exist
+        wb.add_named_style(header_style)  # Add only if it doesn't exist
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
         print(f"✅ Formatting sheet: {sheet_name}")
 
-        # Apply header style safely
+        # Apply column formatting first
+        if sheet_name in column_format_dict:
+            format_dict = column_format_dict[sheet_name]
+
+            for col in ws.iter_cols():
+                col_letter = col[0].column_letter  # Get column letter
+                col_name = col[0].value  # Get header name
+
+                if col_name in format_dict:
+                    format_code = format_dict[col_name]
+
+                    # Apply format to the entire column including header
+                    for cell in col:
+                        cell.number_format = format_code
+
+        # Apply header styling separately
         for cell in ws[1]:  # First row (header)
             cell.style = "header_style"
 
     # **CRITICAL**: Save the workbook while keeping macros
     try:
-        #base_name, ext = os.path.splitext(output_file)
-        #versioned_output_file = f"{base_name}_01{ext}"
-        #wb.save(versioned_output_file)
         wb.save(output_file)
         print(f"✅ Successfully formatted and saved {output_file}")
     except Exception as e:
@@ -844,7 +926,7 @@ def excel_autofilters(output_path):
     print(f"✅ Adding auto-filters to {output_path}")
     
     # Open workbook while preserving macros
-    workbook = load_workbook(output_path, keep_vba=True)  
+    workbook = load_workbook(output_path, keep_vba=True)
 
     for sheetname in workbook.sheetnames:
         worksheet = workbook[sheetname]
@@ -882,6 +964,36 @@ def perform_audit(df, client_name):
 
     audit_df = df[df['NOMEF'] == client_name][audit_columns]  
     return audit_df
+
+def AuditMP_SH(all_data, mp2, empresa):
+    lpi_columns = [
+        'CÓDIGO PEDIDO',
+        'EMPRESA',
+        'MP',
+        'MP2',
+        'STATUS PEDIDO',
+        'CODPP',
+        'VLRVENDA',
+        'QTD',
+        'REPASSE']
+
+    sh_columns = [
+        'ID DO PEDIDO',
+        'VALOR']
+    
+    dfa = all_data['L_LPI'][lpi_columns]
+    dfa = dfa[(dfa["MP2"] == mp2) & (dfa["EMPRESA"] == empresa)]
+
+    all_data[f'Aud_{mp2}'] = dfa
+    all_data = merge_data(all_data, f'Aud_{mp2}', "CÓDIGO PEDIDO", "SHK_Extrato", "ID DO PEDIDO", "VALOR", default_value=0)
+
+    return all_data
+
+# Define the function to perform audits for all specified clients
+def perform_all_MP_audits(all_data):
+    all_data = AuditMP_SH(all_data, 'SH','K')
+    return all_data
+
 
 # Define the function to perform audits for all specified clients
 def perform_all_audits(all_data):
@@ -1026,6 +1138,9 @@ def main():
         'O_CC': 'O_CC_{year_month}_clean.xlsx',
         'O_CtasAPagar': 'O_CtasAPagar_{year_month}_clean.xlsx',
         'O_CtasARec': 'O_CtasARec_{year_month}_clean.xlsx',
+        'MLK_ExtLib': 'MLK_ExtLib_{year_month}_clean.xlsx',
+        'SHK_Extrato': 'SHK_Extrato_{year_month}_clean.xlsx',
+        'MGK_Pacotes': 'MGK_Pacotes_{year_month}_clean.xlsx',
     }
 
     all_data = {}
@@ -1063,6 +1178,10 @@ def main():
 
     # Merge all data with static data
     all_data = merge_all_data(all_data) 
+
+    # Perform audits for the specified Marketplaces
+    all_data = perform_all_MP_audits(all_data)
+    print(f"Audit completed for ALL MARKETPLACES")
 
     # Perform audits for the specified clients
     all_data = perform_all_audits(all_data)
