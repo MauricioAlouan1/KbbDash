@@ -29,7 +29,7 @@ import re
 
 #Global
 ano_x = 2025
-mes_x = 2
+mes_x = 1
 
 # Format month as two digits (01, 02, ..., 12)
 mes_str = f"{mes_x:02d}"
@@ -52,7 +52,7 @@ else:
 print("Base directory set to:", base_dir)
 
 static_dir = os.path.join(base_dir, 'Tables')
-inventory_file_path = os.path.join(static_dir, 'R_EstoqComp.xlsx')  # Update to the correct path if needed
+#inventory_file_path = os.path.join(static_dir, 'R_EstoqComp.xlsx')  # Update to the correct path if needed
 template_file = os.path.join(base_dir, "Template", "PivotTemplate.xlsm")
 output_file = os.path.join(base_dir, "clean", ano_mes, f"R_Resumo_{ano_mes}.xlsm")
 
@@ -975,19 +975,53 @@ def AuditMP_SH(all_data, mp2, empresa):
         'CODPP',
         'VLRVENDA',
         'QTD',
-        'REPASSE']
+        'REPASSE'
+    ]
 
     sh_columns = [
         'ID DO PEDIDO',
-        'VALOR']
+        'VALOR'
+    ]
     
-    dfa = all_data['L_LPI'][lpi_columns]
+    # Select and filter L_LPI data
+    dfa = all_data['L_LPI'][lpi_columns].copy()
     dfa = dfa[(dfa["MP2"] == mp2) & (dfa["EMPRESA"] == empresa)]
 
+    if dfa.empty:
+        print(f"Warning: No matching data found for MP2={mp2} and EMPRESA={empresa}")
+
+    # Rename columns
+    rename_map = {
+        'VLRVENDA': 'VENDATOTAL',
+        'REPASSE': 'REPASSEESPERADO_TODOSPEDIDOS'
+    }
+    dfa.rename(columns=rename_map, inplace=True)
+
+    # Store in all_data dictionary
     all_data[f'Aud_{mp2}'] = dfa
+
+    # Merge with SHK_Extrato
     all_data = merge_data(all_data, f'Aud_{mp2}', "CÓDIGO PEDIDO", "SHK_Extrato", "ID DO PEDIDO", "VALOR", default_value=0)
 
+    # Ensure columns exist before renaming
+    if 'VALOR' in all_data[f'Aud_{mp2}'].columns:
+        all_data[f'Aud_{mp2}'].rename(columns={'VALOR': 'REPASSEEFETIVO_PEDIDOSPAGOS'}, inplace=True)
+    else:
+        print(f"Warning: 'VALOR' column not found after merge in Aud_{mp2}")
+
+    # Check for missing columns before applying the lambda function
+    required_columns = ['REPASSEESPERADO_TODOSPEDIDOS', 'REPASSEEFETIVO_PEDIDOSPAGOS']
+    missing_columns = [col for col in required_columns if col not in all_data[f'Aud_{mp2}'].columns]
+
+    if missing_columns:
+        print(f"Error: Missing columns {missing_columns} in Aud_{mp2}")
+    else:
+        all_data[f'Aud_{mp2}']['REPASSEESPERADO_PEDIDOSPAGOS'] = all_data[f'Aud_{mp2}'].apply(
+            lambda row: 0 if row['REPASSEEFETIVO_PEDIDOSPAGOS'] == 0 else row['REPASSEESPERADO_TODOSPEDIDOS'], axis=1
+        )
+
     return all_data
+
 
 # Define the function to perform audits for all specified clients
 def perform_all_MP_audits(all_data):
@@ -1168,11 +1202,11 @@ def main():
     for key, df in static_data_dict.items():
         print(f"Static data {key} shape: {df.shape}")  # Debug print
     
-    inventory_data = preprocess_inventory_data(inventory_file_path)
+    #inventory_data = preprocess_inventory_data(inventory_file_path)
 
     # Add static data to all_data dictionary
     all_data.update(static_data_dict)
-    all_data.update(inventory_data)
+    #all_data.update(inventory_data)
     
     all_data = rename_columns(all_data, column_rename_dict)
 
