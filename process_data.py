@@ -161,9 +161,15 @@ def process_MGK_Pacotes_CSV(file_path):
     print("✅ MGK_Pacotes CSV processing completed with all numeric fields correctly formatted.")
     return data
 
-def process_MLK_ExtLib_CSV(file_path):
-    """Process MLK_ExtLib CSV files by handling encoding, delimiter, numeric conversion, and timezone issues."""
+import pandas as pd
 
+import pandas as pd
+
+import pandas as pd
+
+def process_MLK_ExtLib_CSV(file_path):
+    """Process MLK_ExtLib CSV files while preserving long numeric columns, filtering rows, and adding new columns."""
+    
     # Detect encoding and delimiter
     encoding, delimiter = detect_encoding_and_delimiter(file_path)
 
@@ -171,8 +177,15 @@ def process_MLK_ExtLib_CSV(file_path):
     if encoding.lower() == "ascii":
         encoding = "utf-8"
 
-    # Load CSV with detected encoding and delimiter
-    data = pd.read_csv(file_path, encoding=encoding, delimiter=delimiter)
+    # Define columns that must be treated as strings to avoid digit loss
+    string_columns = ["ORDER_ID", "TRANSACTION_ID", "REFERENCE_NUMBER"]  # Add more if needed
+
+    # Load CSV with proper dtypes
+    data = pd.read_csv(file_path, encoding=encoding, delimiter=delimiter, dtype={col: str for col in string_columns})
+
+    # ✅ Exclude unwanted rows where RECORD_TYPE is "initial_available_balance" or "total"
+    if "RECORD_TYPE" in data.columns:
+        data = data[~data["RECORD_TYPE"].isin(["initial_available_balance", "total"])]
 
     # ✅ Convert date column & ensure timezone-unaware timestamps
     if "DATE" in data.columns:
@@ -192,8 +205,22 @@ def process_MLK_ExtLib_CSV(file_path):
             data[col] = data[col].replace(r"[R$\s]", "", regex=True).replace(",", ".", regex=True)
             data[col] = pd.to_numeric(data[col], errors="coerce")  # Convert to float
 
-    print("✅ MLK_ExtLib CSV processing completed successfully.")
+    # ✅ Ensure ORDER_ID and other long numeric IDs remain strings
+    for col in string_columns:
+        if col in data.columns:
+            data[col] = data[col].astype(str)  # Ensure stored as string
+
+    # ✅ Add new column: NETVALUE = NET_CREDIT_AMOUNT - NET_DEBIT_AMOUNT
+    if "NET_CREDIT_AMOUNT" in data.columns and "NET_DEBIT_AMOUNT" in data.columns:
+        data["NETVALUE"] = data["NET_CREDIT_AMOUNT"] - data["NET_DEBIT_AMOUNT"]
+    
+    # ✅ Add new column: DESC (Extracts before first "_" if present)
+    if "DESCRIPTION" in data.columns:
+        data["DESC"] = data["DESCRIPTION"].apply(lambda x: x.split("_")[0] if "_" in str(x) else x)
+
+    print("✅ MLK_ExtLib CSV processing completed successfully. Unwanted rows removed. New columns added.")
     return data
+
 
 def process_MGK_Extrato(data):
     """Process MGK_Extrato files by removing the last row (totals) while keeping all formatting."""
