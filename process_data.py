@@ -11,7 +11,6 @@ import pandas as pd
 import numpy as np
 import chardet
 
-
 # Define the potential base directories
 path_options = [
     '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/',
@@ -26,15 +25,14 @@ else:
     # If no valid path is found, raise an error or handle it appropriately
     print("None of the specified directories exist.")
     base_dir = None  # Or set a default path if appropriate
-
-print("Base directory set to:", base_dir)
+#print("Base directory set to:", base_dir)
 
 def find_header_row(filepath, header_name):
     """Utility function to find the header row index using pandas."""
     for i, row in pd.read_excel(filepath, header=None).iterrows():
         if header_name in row.values:
             return i
-    raise ValueError(f"Header {header_name} not found in the file.")
+        raise ValueError(f"Header {header_name} not found in the file.")
 
 def process_O_NFCI(data):
     """Inspect and process O_NFCI files: Remove rows where 'Situação' is effectively blank."""
@@ -161,12 +159,6 @@ def process_MGK_Pacotes_CSV(file_path):
     print("✅ MGK_Pacotes CSV processing completed with all numeric fields correctly formatted.")
     return data
 
-import pandas as pd
-
-import pandas as pd
-
-import pandas as pd
-
 def process_MLK_ExtLib_CSV(file_path):
     """Process MLK_ExtLib CSV files while preserving long numeric columns, filtering rows, and adding new columns."""
     
@@ -220,7 +212,6 @@ def process_MLK_ExtLib_CSV(file_path):
 
     print("✅ MLK_ExtLib CSV processing completed successfully. Unwanted rows removed. New columns added.")
     return data
-
 
 def process_MGK_Extrato(data):
     """Process MGK_Extrato files by removing the last row (totals) while keeping all formatting."""
@@ -512,7 +503,6 @@ def check_and_process_files_csv():
                             pass
                             # print(f"Skipped {file}, already processed.")
 
-
 def extract_hyperlinks_data(filepath, header_name):
     """Extract data and create a new column for hyperlinks for a specific header."""
     wb = openpyxl.load_workbook(filepath, data_only=False)
@@ -542,7 +532,6 @@ def extract_hyperlinks_data(filepath, header_name):
             data_rows.append(row_data)
 
     return pd.DataFrame(data_rows, columns=headers)
-
 
 def save_cleaned_data(data, output_filepath):
     """Save the cleaned data to a new Excel file."""
