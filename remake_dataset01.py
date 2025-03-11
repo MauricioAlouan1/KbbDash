@@ -69,7 +69,6 @@ print(f"✅ Removing {len(wb_template.sheetnames)} sheets from template...")
 for sheet in wb_template.sheetnames:
     del wb_template[sheet]
 
-
 column_rename_dict = {
     'O_NFCI': {
         'Operação': 'OP',
@@ -172,13 +171,11 @@ column_format_dict = {
         'DATA BASE': 'DD-MMM-YY',  
     },
 }
-
 rows_todrop = {
     'O_NFCI': {
         'C': 0,
     }
 }
-
 cols_todrop = {
     'O_NFCI': {
         'PROJETO': 'd',
@@ -229,8 +226,6 @@ cols_todrop = {
 
 }
 
-
-
 audit_client_names = ['ALWE', 'COMPROU CHEGOU', 'NEXT COMPRA']  # Add other clients as needed
 invaudit_client_names = ['ALWE', 'COMPROU CHEGOU', 'NEXT COMPRA']  # Add other clients as needed
 
@@ -253,8 +248,12 @@ def load_recent_data(base_dir, file_pattern, ds_year = ano_x, ds_month = mes_x):
     current_date = datetime(ds_year, ds_month, 1)
     year_month = current_date.strftime('%Y_%m')
     file_path = os.path.join(base_dir, 'clean', year_month, file_pattern.format(year_month=year_month))
+
+    # Specify which columns should always be treated as strings
+    string_columns = ["ORDER_ID", "TRANSACTION_ID", "SHIPPING_ID", "SOURCE_ID", "EXTERNAL_REFERENCE"]
+
     if os.path.exists(file_path):
-        df = pd.read_excel(file_path)
+        df = pd.read_excel(file_path, dtype={col: str for col in string_columns})
         frames.append(df)
         #print(f"Loaded {file_path} with shape: {df.shape}")  # Debug print
     else:
@@ -1135,7 +1134,7 @@ def AuditMP_ML(all_data, mp2, empresa):
 # Define the function to perform audits for all specified clients
 def perform_all_MP_audits(all_data):
     all_data = AuditMP_SH(all_data, 'SH','K')
-    #all_data = AuditMP_ML(all_data, 'ML','K')
+    all_data = AuditMP_ML(all_data, 'ML','K')
     return all_data
 
 
@@ -1305,7 +1304,7 @@ def main():
         for col in string_columns:
             if col in recent_data.columns:
                 recent_data[col] = recent_data[col].astype(str)  # Ensure stored as text
-
+                print(f"Changed {col} to str. Sample values: {recent_data[col].head().tolist()}")
 
         all_data[key] = recent_data
 
