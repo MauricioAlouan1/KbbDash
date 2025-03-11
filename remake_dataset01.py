@@ -767,6 +767,58 @@ def merge_data_lastcost(all_data, df1_name, df1_product_col, df1_date_col, df2_n
 
     return all_data
 
+def merge_data_sum(all_data, df1_name, df1_col, df2_name, df2_col, new_col, indicator_name=None, default_value=0):
+    """
+    Merges two datasets, summing up multiple occurrences of the same key in df2 before merging.
+    
+    Parameters:
+    - all_data: Dictionary containing dataframes
+    - df1_name: Name of the first dataframe in all_data (target dataframe)
+    - df1_col: Column in df1 to match on
+    - df2_name: Name of the second dataframe in all_data (source dataframe)
+    - df2_col: Column in df2 to match on
+    - new_col: Column in df2 that should be summed before merging
+    - indicator_name: Optional, column name to indicate merge status
+    - default_value: Value to use for missing matches (default = 0)
+    
+    Returns:
+    - Updated all_data dictionary with the merged dataframe
+    """
+    df1_col = df1_col.upper()
+    df2_col = df2_col.upper()
+    new_col = new_col.upper()
+
+    if df1_name in all_data and df2_name in all_data:
+        df1 = all_data[df1_name]
+        df2 = all_data[df2_name]
+
+        # Standardize column names
+        df1.columns = [col.upper() for col in df1.columns]
+        df2.columns = [col.upper() for col in df2.columns]
+
+        if df1_col not in df1.columns or df2_col not in df2.columns or new_col not in df2.columns:
+            raise KeyError(f"Column '{df1_col}', '{df2_col}', or '{new_col}' not found in dataframes.")
+
+        # ✅ Aggregate df2 by summing new_col for each df2_col
+        df2_agg = df2.groupby(df2_col, as_index=False)[new_col].sum()
+
+        # ✅ Merge the summed values into df1
+        merged_df = df1.merge(df2_agg, left_on=df1_col, right_on=df2_col, how='left', indicator=indicator_name, suffixes=('', '_DROP'))
+
+        # Remove the '_DROP' columns
+        merged_df.drop([col for col in merged_df.columns if col.endswith('_DROP')], axis=1, inplace=True)
+
+        # ✅ Fill missing values with default_value
+        merged_df[new_col] = merged_df[new_col].fillna(default_value)
+
+        # ✅ If using an indicator, replace unmatched values
+        if indicator_name:
+            merged_df[indicator_name] = merged_df[indicator_name].apply(lambda x: default_value if x == 'left_only' else merged_df[new_col])
+            merged_df.drop(columns=[new_col, indicator_name], inplace=True)
+
+        all_data[df1_name] = merged_df
+    
+    return all_data
 
 def compute_NFCI_ANOMES(all_data):
     for key, df in all_data.items():
@@ -1022,10 +1074,68 @@ def AuditMP_SH(all_data, mp2, empresa):
 
     return all_data
 
+def AuditMP_ML(all_data, mp2, empresa):
+    lpi_columns = [
+        'CÓDIGO PEDIDO',
+        'EMPRESA',
+        'MP',
+        'MP2',
+        'STATUS PEDIDO',
+        'CODPP',
+        'VLRVENDA',
+        'QTD',
+        'REPASSE'
+    ]
+
+    sh_columns = [
+        'ORDER_ID',
+        'NETVALUE',
+        'DESC'
+    ]
+    
+    # Select and filter L_LPI data
+    dfa = all_data['L_LPI'][lpi_columns].copy()
+    dfa = dfa[(dfa["MP2"] == mp2) & (dfa["EMPRESA"] == empresa)]
+
+    if dfa.empty:
+        print(f"Warning: No matching data found for MP2={mp2} and EMPRESA={empresa}")
+
+    # Rename columns
+    rename_map = {
+        'VLRVENDA': 'VENDATOTAL',
+        'REPASSE': 'REPASSEESPERADO_TODOSPEDIDOS'
+    }
+    dfa.rename(columns=rename_map, inplace=True)
+
+    # Store in all_data dictionary
+    all_data[f'Aud_{mp2}'] = dfa
+
+    # Merge with SHK_Extrato
+    all_data = merge_data_sum(all_data, f'Aud_{mp2}', "CÓDIGO PEDIDO", "MLK_ExtLib", "ORDER_ID", "NETVALUE", default_value=0)
+
+    # Ensure columns exist before renaming
+    if 'NETVALUE' in all_data[f'Aud_{mp2}'].columns:
+        all_data[f'Aud_{mp2}'].rename(columns={'NETVALUE': 'REPASSEEFETIVO_PEDIDOSPAGOS'}, inplace=True)
+    else:
+        print(f"Warning: 'VALOR' column not found after merge in Aud_{mp2}")
+
+    # Check for missing columns before applying the lambda function
+    required_columns = ['REPASSEESPERADO_TODOSPEDIDOS', 'REPASSEEFETIVO_PEDIDOSPAGOS']
+    missing_columns = [col for col in required_columns if col not in all_data[f'Aud_{mp2}'].columns]
+
+    if missing_columns:
+        print(f"Error: Missing columns {missing_columns} in Aud_{mp2}")
+    else:
+        all_data[f'Aud_{mp2}']['REPASSEESPERADO_PEDIDOSPAGOS'] = all_data[f'Aud_{mp2}'].apply(
+            lambda row: 0 if row['REPASSEEFETIVO_PEDIDOSPAGOS'] == 0 else row['REPASSEESPERADO_TODOSPEDIDOS'], axis=1
+        )
+
+    return all_data
 
 # Define the function to perform audits for all specified clients
 def perform_all_MP_audits(all_data):
     all_data = AuditMP_SH(all_data, 'SH','K')
+    #all_data = AuditMP_ML(all_data, 'ML','K')
     return all_data
 
 
@@ -1184,10 +1294,18 @@ def main():
         print(f"{key} data shape: {recent_data.shape}")  # Debug print
 
         # Ensure 'N.º de venda' is treated as string if the column exists
-        if 'N.º de venda' in recent_data.columns:
-            recent_data['N.º de venda'] = recent_data['N.º de venda'].astype(str)
-        if 'N.º de venda_hyperlink' in recent_data.columns:
-            recent_data['N.º de venda_hyperlink'] = recent_data['N.º de venda_hyperlink'].astype(str)
+        #if 'N.º de venda' in recent_data.columns:
+        #    recent_data['N.º de venda'] = recent_data['N.º de venda'].astype(str)
+        #if 'N.º de venda_hyperlink' in recent_data.columns:
+        #    recent_data['N.º de venda_hyperlink'] = recent_data['N.º de venda_hyperlink'].astype(str)
+
+        # Ensure long numeric IDs remain as text before storing them
+        string_columns = ["ORDER_ID", "TRANSACTION_ID", "N.º de venda", "N.º de venda_hyperlink", "SHIPPING_ID", "SOURCE_ID", "EXTERNAL_REFERENCE"]  # Add more if needed
+
+        for col in string_columns:
+            if col in recent_data.columns:
+                recent_data[col] = recent_data[col].astype(str)  # Ensure stored as text
+
 
         all_data[key] = recent_data
 
