@@ -1131,10 +1131,70 @@ def AuditMP_ML(all_data, mp2, empresa):
 
     return all_data
 
+def AuditMP_MA(all_data, mp2, empresa):
+    lpi_columns = [
+        'CÓDIGO PEDIDO',
+        'EMPRESA',
+        'MP',
+        'MP2',
+        'STATUS PEDIDO',
+        'CODPP',
+        'VLRVENDA',
+        'QTD',
+        'REPASSE'
+    ]
+
+    sh_columns = [
+        'NÚMERO DO PEDIDO',
+        'VALOR LÍQUIDO ESTIMADO A RECEBER (****)',
+        'DESC'
+    ]
+    
+    # Select and filter L_LPI data
+    dfa = all_data['L_LPI'][lpi_columns].copy()
+    dfa = dfa[(dfa["MP2"] == mp2) & (dfa["EMPRESA"] == empresa)]
+
+    if dfa.empty:
+        print(f"Warning: No matching data found for MP2={mp2} and EMPRESA={empresa}")
+
+    # Rename columns
+    rename_map = {
+        'VLRVENDA': 'VENDATOTAL',
+        'REPASSE': 'REPASSEESPERADO_TODOSPEDIDOS'
+    }
+    dfa.rename(columns=rename_map, inplace=True)
+
+    # Store in all_data dictionary
+    all_data[f'Aud_{mp2}'] = dfa
+
+    # Merge with SHK_Extrato
+    all_data = merge_data_sum(all_data, f'Aud_{mp2}', "CÓDIGO PEDIDO", "MGK_Extrato", "NÚMERO DO PEDIDO", "VALOR LÍQUIDO ESTIMADO A RECEBER (****)", default_value=0)
+
+    # Ensure columns exist before renaming
+    if 'VALOR LÍQUIDO ESTIMADO A RECEBER (****)' in all_data[f'Aud_{mp2}'].columns:
+        all_data[f'Aud_{mp2}'].rename(columns={'VALOR LÍQUIDO ESTIMADO A RECEBER (****)': 'REPASSEEFETIVO_PEDIDOSPAGOS'}, inplace=True)
+    else:
+        print(f"Warning: 'VALOR' column not found after merge in Aud_{mp2}")
+
+    # Check for missing columns before applying the lambda function
+    required_columns = ['REPASSEESPERADO_TODOSPEDIDOS', 'REPASSEEFETIVO_PEDIDOSPAGOS']
+    missing_columns = [col for col in required_columns if col not in all_data[f'Aud_{mp2}'].columns]
+
+    if missing_columns:
+        print(f"Error: Missing columns {missing_columns} in Aud_{mp2}")
+    else:
+        all_data[f'Aud_{mp2}']['REPASSEESPERADO_PEDIDOSPAGOS'] = all_data[f'Aud_{mp2}'].apply(
+            lambda row: 0 if row['REPASSEEFETIVO_PEDIDOSPAGOS'] == 0 else row['REPASSEESPERADO_TODOSPEDIDOS'], axis=1
+        )
+
+    return all_data
+
+
 # Define the function to perform audits for all specified clients
 def perform_all_MP_audits(all_data):
     all_data = AuditMP_SH(all_data, 'SH','K')
     all_data = AuditMP_ML(all_data, 'ML','K')
+    all_data = AuditMP_MA(all_data, 'MA','K')
     return all_data
 
 
@@ -1284,6 +1344,7 @@ def main():
         'MLK_ExtLib': 'MLK_ExtLib_{year_month}_clean.xlsx',
         'SHK_Extrato': 'SHK_Extrato_{year_month}_clean.xlsx',
         'MGK_Pacotes': 'MGK_Pacotes_{year_month}_clean.xlsx',
+        'MGK_Extrato': 'MGK_Extrato_{year_month}_clean.xlsx',
     }
 
     all_data = {}
