@@ -32,7 +32,7 @@ def find_header_row(filepath, header_name):
     for i, row in pd.read_excel(filepath, header=None).iterrows():
         if header_name in row.values:
             return i
-        raise ValueError(f"Header {header_name} not found in the file.")
+    raise ValueError(f"Header {header_name} not found in the file.")
 
 def process_O_NFCI(data):
     """Inspect and process O_NFCI files: Remove rows where 'Situação' is effectively blank."""
@@ -226,7 +226,7 @@ def process_MGK_Extrato(data):
     return data
 
 def process_SHK_Extrato(data):
-    """Process O_Estoq files: adapt this function to meet specific requirements."""
+    """Process SHK_Extrato files: adapt this function to meet specific requirements."""
     # Example: Remove rows where 'Código do Produto' is empty
     data = data[data['Data'].notna()]
     return data
