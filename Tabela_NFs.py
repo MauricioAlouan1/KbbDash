@@ -4,6 +4,10 @@ import pandas as pd
 import re
 from openpyxl import load_workbook
 
+# Run processing for all series for a specific month
+YEAR = "2025"
+MONTH = "2-Fevereiro"
+
 # Define base folder and available series
 BASE_FOLDER = "/Users/mauricioalouan/Dropbox/nfs"
 SERIES_LIST = [
@@ -149,7 +153,4 @@ def process_all_series_for_month(year, month):
     for series in SERIES_LIST:
         process_series(month, year, series)
 
-# Run processing for all series for a specific month
-YEAR = "2025"
-MONTH = "1-Janeiro"
 process_all_series_for_month(YEAR, MONTH)
