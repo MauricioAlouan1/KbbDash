@@ -6,7 +6,7 @@ from openpyxl import load_workbook
 
 # Run processing for all series for a specific month
 YEAR = "2025"
-MONTH = "2-Fevereiro"
+MONTH = "2-Fevereiro/XML"
 
 # Define base folder and available series
 BASE_FOLDER = "/Users/mauricioalouan/Dropbox/nfs"
@@ -25,7 +25,7 @@ def process_series(month, year, series):
     """Process XML invoices for a given month, year, and series."""
 
     folder_path = os.path.join(BASE_FOLDER, year, series, month)
-    output_file = os.path.join(BASE_FOLDER, f"Extracted_Data_{year}_{month}_{series}.xlsx")
+    output_file = os.path.join(BASE_FOLDER, f"Extracted_Data_{year}_{month.replace('/', '-')}_{series}.xlsx")
 
     if not os.path.exists(folder_path):
         print(f"Skipping {series}: Folder not found -> {folder_path}")
