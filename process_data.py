@@ -166,8 +166,10 @@ def process_MLK_ExtLib_CSV(file_path):
     encoding, delimiter = detect_encoding_and_delimiter(file_path)
 
     # Fallback to UTF-8 if ASCII is detected (to avoid errors)
-    if encoding.lower() == "ascii":
+    if encoding and encoding.lower() == "ascii":
         encoding = "utf-8"
+    elif encoding is None:
+        encoding = "utf-8"  # Fallback seguro
 
     # Define columns that must be treated as strings to avoid digit loss
     string_columns = ["ORDER_ID", "TRANSACTION_ID", "REFERENCE_NUMBER"]  # Add more if needed
