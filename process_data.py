@@ -11,7 +11,6 @@ import pandas as pd
 import numpy as np
 import chardet
 
-
 # Define the potential base directories
 path_options = [
     '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/',
@@ -26,8 +25,7 @@ else:
     # If no valid path is found, raise an error or handle it appropriately
     print("None of the specified directories exist.")
     base_dir = None  # Or set a default path if appropriate
-
-print("Base directory set to:", base_dir)
+#print("Base directory set to:", base_dir)
 
 def find_header_row(filepath, header_name):
     """Utility function to find the header row index using pandas."""
@@ -162,17 +160,26 @@ def process_MGK_Pacotes_CSV(file_path):
     return data
 
 def process_MLK_ExtLib_CSV(file_path):
-    """Process MLK_ExtLib CSV files by handling encoding, delimiter, numeric conversion, and timezone issues."""
-
+    """Process MLK_ExtLib CSV files while preserving long numeric columns, filtering rows, and adding new columns."""
+    
     # Detect encoding and delimiter
     encoding, delimiter = detect_encoding_and_delimiter(file_path)
 
     # Fallback to UTF-8 if ASCII is detected (to avoid errors)
-    if encoding.lower() == "ascii":
+    if encoding and encoding.lower() == "ascii":
         encoding = "utf-8"
+    elif encoding is None:
+        encoding = "utf-8"  # Fallback seguro
 
-    # Load CSV with detected encoding and delimiter
-    data = pd.read_csv(file_path, encoding=encoding, delimiter=delimiter)
+    # Define columns that must be treated as strings to avoid digit loss
+    string_columns = ["ORDER_ID", "TRANSACTION_ID", "REFERENCE_NUMBER"]  # Add more if needed
+
+    # Load CSV with proper dtypes
+    data = pd.read_csv(file_path, encoding=encoding, delimiter=delimiter, dtype={col: str for col in string_columns})
+
+    # ✅ Exclude unwanted rows where RECORD_TYPE is "initial_available_balance" or "total"
+    if "RECORD_TYPE" in data.columns:
+        data = data[~data["RECORD_TYPE"].isin(["initial_available_balance", "total"])]
 
     # ✅ Convert date column & ensure timezone-unaware timestamps
     if "DATE" in data.columns:
@@ -192,7 +199,20 @@ def process_MLK_ExtLib_CSV(file_path):
             data[col] = data[col].replace(r"[R$\s]", "", regex=True).replace(",", ".", regex=True)
             data[col] = pd.to_numeric(data[col], errors="coerce")  # Convert to float
 
-    print("✅ MLK_ExtLib CSV processing completed successfully.")
+    # ✅ Ensure ORDER_ID and other long numeric IDs remain strings
+    for col in string_columns:
+        if col in data.columns:
+            data[col] = data[col].astype(str)  # Ensure stored as string
+
+    # ✅ Add new column: NETVALUE = NET_CREDIT_AMOUNT - NET_DEBIT_AMOUNT
+    if "NET_CREDIT_AMOUNT" in data.columns and "NET_DEBIT_AMOUNT" in data.columns:
+        data["NETVALUE"] = data["NET_CREDIT_AMOUNT"] - data["NET_DEBIT_AMOUNT"]
+    
+    # ✅ Add new column: DESC (Extracts before first "_" if present)
+    if "DESCRIPTION" in data.columns:
+        data["DESC"] = data["DESCRIPTION"].apply(lambda x: x.split("_")[0] if "_" in str(x) else x)
+
+    print("✅ MLK_ExtLib CSV processing completed successfully. Unwanted rows removed. New columns added.")
     return data
 
 def process_MGK_Extrato(data):
@@ -208,7 +228,7 @@ def process_MGK_Extrato(data):
     return data
 
 def process_SHK_Extrato(data):
-    """Process O_Estoq files: adapt this function to meet specific requirements."""
+    """Process SHK_Extrato files: adapt this function to meet specific requirements."""
     # Example: Remove rows where 'Código do Produto' is empty
     data = data[data['Data'].notna()]
     return data
@@ -485,7 +505,6 @@ def check_and_process_files_csv():
                             pass
                             # print(f"Skipped {file}, already processed.")
 
-
 def extract_hyperlinks_data(filepath, header_name):
     """Extract data and create a new column for hyperlinks for a specific header."""
     wb = openpyxl.load_workbook(filepath, data_only=False)
@@ -515,7 +534,6 @@ def extract_hyperlinks_data(filepath, header_name):
             data_rows.append(row_data)
 
     return pd.DataFrame(data_rows, columns=headers)
-
 
 def save_cleaned_data(data, output_filepath):
     """Save the cleaned data to a new Excel file."""
