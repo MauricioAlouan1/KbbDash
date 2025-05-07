@@ -1,3 +1,4 @@
+import gc
 import pandas as pd
 from pathlib import Path
 
@@ -97,3 +98,6 @@ output_path = base_path / f"R_Compras_{ANO}_{MES:02}.xlsx"
 relatorio.to_excel(output_path, index=False)
 
 print(f"✅ Relatório salvo em: {output_path}")
+
+del o_nfci, l_lpi, estoque, vendas_nfci, vendas_lpi, vendas, relatorio
+gc.collect()
