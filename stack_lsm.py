@@ -9,8 +9,8 @@ import psutil  # To check memory usage
 
 # Global variables
 timeframe = 6  # Default: Last 6 months
-ano_x = 2024
-mes_x = 12
+ano_x = 2025
+mes_x = 4
 
 # Define potential base directories
 path_options = [
@@ -92,11 +92,10 @@ def stack_sheets(file_paths):
                 if sheet_name not in stacked_data:
                     stacked_data[sheet_name] = df
                 else:
-                    if list(stacked_data[sheet_name].columns) == list(df.columns):
-                        stacked_data[sheet_name] = pd.concat([stacked_data[sheet_name], df], ignore_index=True)
-                        print(f"🔄 Stacked {sheet_name}: {stacked_data[sheet_name].shape}")
-                    else:
-                        print(f"⚠️ Column mismatch in {sheet_name}. Skipping...")
+                    # Alinha as colunas atuais com as do acumulado, ignorando extras
+                    df_aligned = df.reindex(columns=stacked_data[sheet_name].columns)
+                    stacked_data[sheet_name] = pd.concat([stacked_data[sheet_name], df_aligned], ignore_index=True)
+                    print(f"🔄 Stacked {sheet_name}: {stacked_data[sheet_name].shape}")
 
             except Exception as e:
                 print(f"❌ Error reading {sheet_name}: {e}")

@@ -81,6 +81,8 @@ def process_T_EstTrans(data):
     return data
     
 def process_L_LPI(data):
+    data = data[data["Data"].notna()].copy()
+    
     cols_to_delete = ['Preço', 'Preço Total', 'Desconto Pedido', 'Desconto Item', 
                       'Desconto Total', 'Desconto Item Seller', 'Comissão', 'Frete Comprador', 
                       'Acrescimo', 'Recebimento', 'Custo', 'Custo Total', 'Imposto', 
