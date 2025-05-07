@@ -284,9 +284,42 @@ def propagate_package_info(df):
     
     return df
 
+def check_columns_and_rename(df, required_dict):
+    """
+    Verifica se pelo menos uma das colunas alternativas existe para cada campo requerido
+    e renomeia para o nome padrão.
+
+    Lança um ValueError se alguma coluna essencial estiver ausente.
+    """
+    missing = []
+
+    for standard_name, options in required_dict.items():
+        found = False
+        for opt in options:
+            if opt in df.columns:
+                df.rename(columns={opt: standard_name}, inplace=True)
+                found = True
+                break
+        if not found:
+            missing.append(f"{standard_name} (expected one of: {options})")
+
+    if missing:
+        raise ValueError(f"Dataframe does not contain required columns: {missing}")
+    
 def process_ml_data(df):
     # Ensure the required columns exist before processing
     required_columns = ['N.º de venda', 'SKU', 'Receita por produtos (BRL)', 'Receita por envio (BRL)', 'Tarifa de venda e impostos', 'Tarifas de envio', 'Cancelamentos e reembolsos (BRL)']
+    required_columns_alternatives = {
+    'N.º de venda': ['N.º de venda'],
+    'SKU': ['SKU'],
+    'Receita por produtos (BRL)': ['Receita por produtos (BRL)'],
+    'Receita por envio (BRL)': ['Receita por envio (BRL)'],
+    'Tarifa de venda e impostos': ['Tarifa de venda e impostos', 'Tarifa de venda e impostos (BRL)'],
+    'Tarifas de envio': ['Tarifas de envio', 'Tarifas de envio (BRL)'],
+    'Cancelamentos e reembolsos (BRL)': ['Cancelamentos e reembolsos (BRL)']}
+
+    check_columns_and_rename(df, required_columns_alternatives)
+
     if not all(col in df.columns for col in required_columns):
         raise ValueError("Dataframe does not contain all required columns.")
 

@@ -29,7 +29,7 @@ import re
 
 #Global
 ano_x = 2025
-mes_x = 3
+mes_x = 4
 
 # Format month as two digits (01, 02, ..., 12)
 mes_str = f"{mes_x:02d}"
@@ -635,30 +635,56 @@ def merge_data(all_data, df1_name, df1_col, df2_name, df2_col, new_col=None, ind
     if new_col:
         new_col = new_col.upper()
 
-    if df1_name in all_data and df2_name in all_data:
+    # Verifica se os dataframes existem
+    if df1_name not in all_data or df2_name not in all_data:
+        print(f"❌ Dataframe '{df1_name}' or '{df2_name}' not found in all_data.")
+        return all_data
+
+    df1 = all_data[df1_name]
+    df2 = all_data[df2_name]
+
+    # Verifica se os dataframes não estão vazios
+    if df1.empty or df2.empty:
+        print(f"❌ Dataframe '{df1_name}' or '{df2_name}' is empty. Merge skipped.")
+        return all_data
+
+    # Verifica se as colunas existem
+    if df1_col not in df1.columns or df2_col not in df2.columns:
+        print(f"❌ Column '{df1_col}' or '{df2_col}' not found in dataframes '{df1_name}' or '{df2_name}'. Merge skipped.")
+        return all_data
+
+    print(f"Columns in {df1_name} BEFORE merge: {df1.columns.tolist()}")
+
+    cols_to_drop = []
+    if new_col and new_col in df1.columns:
+        cols_to_drop.append(new_col)
+    # Só remover df2_col se NÃO for igual ao campo de junção (df1_col)
+    if df2_col != df1_col and df2_col in df1.columns:
+        cols_to_drop.append(df2_col)
+
+    if cols_to_drop:
+        print(f"⚠️  Dropping existing columns {cols_to_drop} from '{df1_name}' before merge.")
+        all_data[df1_name] = all_data[df1_name].drop(columns=cols_to_drop)
         df1 = all_data[df1_name]
-        df2 = all_data[df2_name]
 
-        # Standardize column names
-        df1.columns = [col.upper() for col in df1.columns]
-        df2.columns = [col.upper() for col in df2.columns]
+    # Faz o merge
+    merged = df1.merge(
+        df2[[df2_col] + ([new_col] if new_col else [])],
+        left_on=df1_col,
+        right_on=df2_col,
+        how='left',
+        indicator=indicator_name is not None
+    )
 
-        if df1_col not in df1.columns or df2_col not in df2.columns:
-            raise KeyError(f"Column '{df1_col}' or '{df2_col}' not found in dataframes.")
+    # Adiciona coluna com valor default se merge falhar
+    if new_col and default_value is not None:
+        merged[new_col] = merged[new_col].fillna(default_value)
 
-        df2_cols = [df2_col] + ([new_col] if new_col else [])
-        merged_df = df1.merge(df2[df2_cols].drop_duplicates(), left_on=df1_col, right_on=df2_col, how='left', indicator=indicator_name, suffixes=('', '_DROP'))
+    if indicator_name:
+        merged[indicator_name] = merged[indicator_name].fillna('no_match')
 
-        # Remove the '_DROP' columns
-        merged_df.drop([col for col in merged_df.columns if col.endswith('_DROP')], axis=1, inplace=True)
-
-        if indicator_name and default_value is not None:
-            merged_df[indicator_name] = merged_df[indicator_name].apply(lambda x: default_value if x == 'left_only' else merged_df[new_col])
-            merged_df.drop(columns=[new_col, indicator_name], inplace=True)
-        elif new_col and default_value is not None:
-            merged_df[new_col] = merged_df[new_col].fillna(default_value)
-
-        all_data[df1_name] = merged_df
+    all_data[df1_name] = merged
+    print(f"✅ Merge applied: {df1_name} ← {df2_name} by '{df1_col}'")
     return all_data
 
 def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2_col2, df2_val_col, new_col_name, default_value=None, negative=False):
@@ -687,6 +713,13 @@ def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2
             df2[df2_val_col] = df2[df2_val_col] * -1  # Make the VALUE column negative
 
         df2_cols = [df2_col1, df2_col2, df2_val_col]
+
+        # Remove colunas que já existam com o mesmo nome da futura 'new_col_name'
+        cols_to_drop = [col for col in df1.columns if col.upper().startswith(new_col_name)]
+        if cols_to_drop:
+            print(f"⚠️  Dropping existing columns {cols_to_drop} from '{df1_name}' before merge_data2v.")
+            df1 = df1.drop(columns=cols_to_drop)
+
         merged_df = df1.merge(df2[df2_cols].drop_duplicates(), left_on=[df1_col1, df1_col2], right_on=[df2_col1, df2_col2], how='left')
 
         if df2_val_col and default_value is not None:
@@ -787,35 +820,47 @@ def merge_data_sum(all_data, df1_name, df1_col, df2_name, df2_col, new_col, indi
     df2_col = df2_col.upper()
     new_col = new_col.upper()
 
-    if df1_name in all_data and df2_name in all_data:
-        df1 = all_data[df1_name]
-        df2 = all_data[df2_name]
+    # ✅ Check if both dataframes exist
+    if df1_name not in all_data:
+        print(f"❌ Dataframe '{df1_name}' not found. Merge skipped.")
+        return all_data
+    if df2_name not in all_data:
+        print(f"❌ Dataframe '{df2_name}' not found. Merge skipped.")
+        return all_data
 
-        # Standardize column names
-        df1.columns = [col.upper() for col in df1.columns]
-        df2.columns = [col.upper() for col in df2.columns]
+    df1 = all_data[df1_name]
+    df2 = all_data[df2_name]
 
-        if df1_col not in df1.columns or df2_col not in df2.columns or new_col not in df2.columns:
-            raise KeyError(f"Column '{df1_col}', '{df2_col}', or '{new_col}' not found in dataframes.")
+    # ✅ Check if source dataframe is empty (df2)
+    if df2.empty:
+        print(f"❌ Dataframe '{df2_name}' is empty. Merge skipped.")
+        return all_data
 
-        # ✅ Aggregate df2 by summing new_col for each df2_col
-        df2_agg = df2.groupby(df2_col, as_index=False)[new_col].sum()
+    # Standardize column names
+    df1.columns = [col.upper() for col in df1.columns]
+    df2.columns = [col.upper() for col in df2.columns]
 
-        # ✅ Merge the summed values into df1
-        merged_df = df1.merge(df2_agg, left_on=df1_col, right_on=df2_col, how='left', indicator=indicator_name, suffixes=('', '_DROP'))
+    if df1_col not in df1.columns or df2_col not in df2.columns or new_col not in df2.columns:
+        raise KeyError(f"Column '{df1_col}', '{df2_col}', or '{new_col}' not found in dataframes.")
 
-        # Remove the '_DROP' columns
-        merged_df.drop([col for col in merged_df.columns if col.endswith('_DROP')], axis=1, inplace=True)
+    # ✅ Aggregate df2 by summing new_col for each df2_col
+    df2_agg = df2.groupby(df2_col, as_index=False)[new_col].sum()
 
-        # ✅ Fill missing values with default_value
-        merged_df[new_col] = merged_df[new_col].fillna(default_value)
+    # ✅ Merge the summed values into df1
+    merged_df = df1.merge(df2_agg, left_on=df1_col, right_on=df2_col, how='left', indicator=indicator_name, suffixes=('', '_DROP'))
 
-        # ✅ If using an indicator, replace unmatched values
-        if indicator_name:
-            merged_df[indicator_name] = merged_df[indicator_name].apply(lambda x: default_value if x == 'left_only' else merged_df[new_col])
-            merged_df.drop(columns=[new_col, indicator_name], inplace=True)
+    # Remove the '_DROP' columns
+    merged_df.drop([col for col in merged_df.columns if col.endswith('_DROP')], axis=1, inplace=True)
 
-        all_data[df1_name] = merged_df
+    # ✅ Fill missing values with default_value
+    merged_df[new_col] = merged_df[new_col].fillna(default_value)
+
+    # ✅ If using an indicator, replace unmatched values
+    if indicator_name:
+        merged_df[indicator_name] = merged_df[indicator_name].apply(lambda x: default_value if x == 'left_only' else merged_df[new_col])
+        merged_df.drop(columns=[new_col, indicator_name], inplace=True)
+
+    all_data[df1_name] = merged_df
     
     return all_data
 
