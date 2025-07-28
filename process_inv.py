@@ -45,7 +45,7 @@ else:
 
 # Define the date range variables
 start_year = 2025
-start_month = 1
+start_month = 2
 end_year = start_year
 end_month = start_month
 
@@ -120,100 +120,58 @@ def process_inventory_files(year, month):
 
 # Function to lookup CU values and additional columns
 # Function to lookup CU values and additional columns
-def lookup_cu_values(inventory_df):
-    #print("inventory_df")
-    #print(inventory_df)
-    #print(f"inventory_df shape: {inventory_df.shape}")
+def lookup_cu_values(inventory_df, cutoff_date):
 
-    """Lookup various CU values and perform additional calculations."""
     try:
-        # Load T_Entradas.xlsx, ensuring Pai and Filho are treated as text
         entradas_df = pd.read_excel(
             os.path.join(base_dir, 'Tables', 'T_Entradas.xlsx'),
-            dtype={'Pai': str, 'Filho': str}  # Treat Pai and Filho as text
+            dtype={'Pai': str, 'Filho': str}
         )
-        # Print head of df
-        #print("entradas_df")
-        #print(entradas_df.head())
-        #print(f"entradas_df shape: {entradas_df.shape}")
 
-        # Load T_ProdF.xlsx, ensuring CodPF and CodPP are treated as text
         prodf_df = pd.read_excel(
             os.path.join(base_dir, 'Tables', 'T_ProdF.xlsx'),
-            dtype={'CodPF': str, 'CodPP': str}  # Treat CodPF and CodPP as text
+            dtype={'CodPF': str, 'CodPP': str}
         )
-        # Print head of df
-        #print("prodf_df")
-        #print(prodf_df.head())
-        #print(f"prodf_df shape: {prodf_df.shape}")
 
-        # Ensure unique values in key columns to avoid duplicates
-        # Filter T_Entradas where X = 1
-        filtered_entradas = entradas_df[entradas_df['X'] == 1]
-        #print("filtered_entradas")
-        #print(filtered_entradas.head())
-        #print(f"filtered_entradas shape: {filtered_entradas.shape}")
+        # ➤ Converte a data da última entrada
+        entradas_df['Ultima Entrada'] = pd.to_datetime(entradas_df['Ultima Entrada'], errors='coerce')
+        entradas_df = entradas_df[entradas_df['Ultima Entrada'] <= cutoff_date]
 
-        # Ensure that 'Codigo_Inv' is treated as text in inventory_df
+        # ➤ Último custo por Pai
+        last_cu_pai = (
+            entradas_df[entradas_df['Pai'].notna() & (entradas_df['Pai'] != '')]
+            .sort_values(['Pai', 'Ultima Entrada'])
+            .drop_duplicates(subset='Pai', keep='last')[['Pai', 'Ult CU R$']]
+            .rename(columns={'Ult CU R$': 'UCP'})
+        )
+
+        # ➤ Último custo por Filho
+        last_cu_filho = (
+            entradas_df[entradas_df['Filho'].notna() & (entradas_df['Filho'] != '')]
+            .sort_values(['Filho', 'Ultima Entrada'])
+            .drop_duplicates(subset='Filho', keep='last')[['Filho', 'Ult CU R$']]
+            .rename(columns={'Ult CU R$': 'UCF'})
+        )
+
         inventory_df['Codigo'] = inventory_df['Codigo'].astype(str)
         inventory_df.rename(columns={'Quantidade': 'Quantidade_Inv', 'Codigo': 'Codigo_Inv'}, inplace=True)
 
         prodf_df.rename(columns={'CodPF': 'CodPF_Prod', 'CodPP': 'CodPP_Prod'}, inplace=True)
-        #print("---- Renamed Cols:")
-        #print("inventory_df")
-        #print(inventory_df)
-        #print(f"inventory_df shape: {inventory_df.shape}")
-        #print("---- Renamed Cols:")
-        #print("prodf_df")
-        #print(prodf_df)
-        #print(f"prodf_df shape: {prodf_df.shape}")
 
-        # Match 'Codigo_Inv' to T_ProdF['CodPF_Prod'] to get T_ProdF['CodPP_Prod'] as 'CodPP'
-        inventory_df = pd.merge(inventory_df, prodf_df[['CodPF_Prod', 'CodPP_Prod']], left_on='Codigo_Inv', right_on='CodPF_Prod', how='left')
-        #print("---- Matched 1 Cols:")
-        #print("inventory_df")
-        #print(inventory_df)
-        #print(f"inventory_df shape: {inventory_df.shape}")
+        inventory_df = pd.merge(inventory_df, prodf_df[['CodPF_Prod', 'CodPP_Prod']], 
+                                left_on='Codigo_Inv', right_on='CodPF_Prod', how='left')
 
-        # Create UCP by matching CodPP_Prod to T_Entradas[Pai], but exclude rows where Pai is blank
-        filtered_entradas_with_pai = filtered_entradas[filtered_entradas['Pai'].notna() & (filtered_entradas['Pai'] != '')]
+        inventory_df = pd.merge(inventory_df, last_cu_pai, 
+                                left_on='CodPP_Prod', right_on='Pai', how='left')
 
-        duplicate_pai = filtered_entradas_with_pai[filtered_entradas_with_pai.duplicated(subset=['Pai'], keep=False)]
-        #print("Duplicate Pai values in filtered_entradas_with_pai:")
-        #print(duplicate_pai)
-        if not duplicate_pai.empty:
-            print("Warning: Duplicate 'Pai' values found in T_Entradas:")
-            print(duplicate_pai)
-            print("\nPlease correct the file to ensure unique 'Pai' values.")
-            sys.exit("Execution stopped due to duplicate 'Pai' values.")
-
-        # Now perform the merge only with non-blank 'Pai' values
-        inventory_df = pd.merge(inventory_df,
-                                filtered_entradas_with_pai[['Pai', 'Ult CU R$']].rename(columns={'Ult CU R$': 'UCP'}),
-                                left_on='CodPP_Prod',
-                                right_on='Pai',
-                                how='left')
-        #print("---- Create UCP by matching CodPP_Prod to T_Entradas[Pai] (non-blank Pai)")
-        #print(inventory_df)
-        #print(f"inventory_df shape after merge: {inventory_df.shape}")
-
-        # Create UCF by matching Codigo_Inv to T_Entradas[Filho]
-        inventory_df = pd.merge(inventory_df, filtered_entradas[['Filho', 'Ult CU R$']].rename(columns={'Ult CU R$': 'UCF'}),
+        inventory_df = pd.merge(inventory_df, last_cu_filho, 
                                 left_on='Codigo_Inv', right_on='Filho', how='left')
-        #print("---- Create UCP by matching CodPP_Prod to T_Entradas[Filho]")
-        #print("inventory_df")
-        #print(inventory_df)
-        #print(f"inventory_df shape: {inventory_df.shape}")
 
-        # Ensure 'Quantidade_Inv', 'UCP', and 'UCF' are numeric (force conversion)
         inventory_df['Quantidade_Inv'] = pd.to_numeric(inventory_df['Quantidade_Inv'], errors='coerce').fillna(0)
         inventory_df['UCP'] = pd.to_numeric(inventory_df['UCP'], errors='coerce').fillna(0)
         inventory_df['UCF'] = pd.to_numeric(inventory_df['UCF'], errors='coerce').fillna(0)
 
-        # Create UCU: If UCP > 0, use UCP; otherwise, use UCF
         inventory_df['UCU'] = inventory_df.apply(lambda row: row['UCP'] if row['UCP'] > 0 else row['UCF'], axis=1)
-
-        # Create UCT: UCU * Quantidade_Inv
         inventory_df['UCT'] = inventory_df['UCU'] * inventory_df['Quantidade_Inv']
 
         return inventory_df
@@ -241,7 +199,9 @@ def process_all_months():
                 continue
 
             # Step 2: Lookup CU values and calculate UCU and UCT
-            final_df = lookup_cu_values(inventory_df)
+            cutoff_date = pd.Timestamp(year=year, month=month, day=1) + pd.offsets.MonthEnd(0)
+            final_df = lookup_cu_values(inventory_df, cutoff_date)
+
             if final_df is None:
                 continue
 
