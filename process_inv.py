@@ -28,6 +28,7 @@ from openpyxl.styles import NamedStyle
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import Font, PatternFill
 from openpyxl import Workbook, load_workbook
+import numpy as np
 import sys
 
 # Define the base directory as before, now adding the /clean part
@@ -45,7 +46,7 @@ else:
 
 # Define the date range variables
 start_year = 2025
-start_month = 7
+start_month = 6
 end_year = start_year
 end_month = start_month
 
@@ -120,59 +121,111 @@ def process_inventory_files(year, month):
 
 # Function to lookup CU values and additional columns
 # Function to lookup CU values and additional columns
-def lookup_cu_values(inventory_df, cutoff_date):
-
+def lookup_cu_values(inventory_df, cutoff_code, base_dir=base_dir):
+    """
+    Uses the average CU of the last entrance month (AnoMes) up to cutoff_code.
+    Priority: cost by Pai (parent). Fallback: cost by Filho (child).
+    """
     try:
+        # Load inputs
         entradas_df = pd.read_excel(
             os.path.join(base_dir, 'Tables', 'T_Entradas.xlsx'),
-            dtype={'Pai': str, 'Filho': str}
+            dtype={'Pai': str, 'Filho': str, 'AnoMes': int}
         )
-
         prodf_df = pd.read_excel(
             os.path.join(base_dir, 'Tables', 'T_ProdF.xlsx'),
             dtype={'CodPF': str, 'CodPP': str}
         )
 
-        # ➤ Converte a data da última entrada
-        entradas_df['Ultima Entrada'] = pd.to_datetime(entradas_df['Ultima Entrada'], errors='coerce')
-        entradas_df = entradas_df[entradas_df['Ultima Entrada'] <= cutoff_date]
+        # Only consider entries up to the cutoff yymm
+        entradas_df = entradas_df[entradas_df['AnoMes'] <= cutoff_code].copy()
 
-        # ➤ Último custo por Pai
-        last_cu_pai = (
-            entradas_df[entradas_df['Pai'].notna() & (entradas_df['Pai'] != '')]
-            .sort_values(['Pai', 'Ultima Entrada'])
-            .drop_duplicates(subset='Pai', keep='last')[['Pai', 'Ult CU R$']]
-            .rename(columns={'Ult CU R$': 'UCP'})
-        )
+        # Clean string keys
+        for col in ['Pai', 'Filho']:
+            if col in entradas_df.columns:
+                entradas_df[col] = entradas_df[col].fillna('').astype(str).str.strip()
 
-        # ➤ Último custo por Filho
-        last_cu_filho = (
-            entradas_df[entradas_df['Filho'].notna() & (entradas_df['Filho'] != '')]
-            .sort_values(['Filho', 'Ultima Entrada'])
-            .drop_duplicates(subset='Filho', keep='last')[['Filho', 'Ult CU R$']]
-            .rename(columns={'Ult CU R$': 'UCF'})
-        )
+        # Ensure CU is numeric
+        entradas_df['Ult CU R$'] = pd.to_numeric(entradas_df['Ult CU R$'], errors='coerce')
 
+        # ---------- Last-month average by PAI ----------
+        pai_valid = entradas_df[entradas_df['Pai'] != ''].copy()
+        if not pai_valid.empty:
+            last_ym_pai = (
+                pai_valid.groupby('Pai', as_index=False)['AnoMes']
+                .max()
+                .rename(columns={'AnoMes': 'LastAnoMes'})
+            )
+            pai_last_rows = pai_valid.merge(last_ym_pai, on='Pai', how='inner')
+            avg_cu_pai = (
+                pai_last_rows[pai_last_rows['AnoMes'] == pai_last_rows['LastAnoMes']]
+                .groupby('Pai', as_index=False)['Ult CU R$'].mean()
+                .rename(columns={'Ult CU R$': 'UCP'})
+            )
+        else:
+            avg_cu_pai = pd.DataFrame(columns=['Pai', 'UCP'])
+
+        # ---------- Last-month average by FILHO ----------
+        filho_valid = entradas_df[entradas_df['Filho'] != ''].copy()
+        if not filho_valid.empty:
+            last_ym_filho = (
+                filho_valid.groupby('Filho', as_index=False)['AnoMes']
+                .max()
+                .rename(columns={'AnoMes': 'LastAnoMes'})
+            )
+            filho_last_rows = filho_valid.merge(last_ym_filho, on='Filho', how='inner')
+            avg_cu_filho = (
+                filho_last_rows[filho_last_rows['AnoMes'] == filho_last_rows['LastAnoMes']]
+                .groupby('Filho', as_index=False)['Ult CU R$'].mean()
+                .rename(columns={'Ult CU R$': 'UCF'})
+            )
+        else:
+            avg_cu_filho = pd.DataFrame(columns=['Filho', 'UCF'])
+
+        # ---------- Inventory joins ----------
+        inventory_df = inventory_df.copy()
         inventory_df['Codigo'] = inventory_df['Codigo'].astype(str)
         inventory_df.rename(columns={'Quantidade': 'Quantidade_Inv', 'Codigo': 'Codigo_Inv'}, inplace=True)
 
-        prodf_df.rename(columns={'CodPF': 'CodPF_Prod', 'CodPP': 'CodPP_Prod'}, inplace=True)
+        prodf_df = prodf_df.rename(columns={'CodPF': 'CodPF_Prod', 'CodPP': 'CodPP_Prod'})
 
-        inventory_df = pd.merge(inventory_df, prodf_df[['CodPF_Prod', 'CodPP_Prod']], 
-                                left_on='Codigo_Inv', right_on='CodPF_Prod', how='left')
+        # Map child (PF) to parent (PP)
+        inventory_df = pd.merge(
+            inventory_df,
+            prodf_df[['CodPF_Prod', 'CodPP_Prod']],
+            left_on='Codigo_Inv',
+            right_on='CodPF_Prod',
+            how='left'
+        )
 
-        inventory_df = pd.merge(inventory_df, last_cu_pai, 
-                                left_on='CodPP_Prod', right_on='Pai', how='left')
+        # Merge avg CU by Pai (parent of the PF code)
+        inventory_df = pd.merge(
+            inventory_df,
+            avg_cu_pai,
+            left_on='CodPP_Prod',
+            right_on='Pai',
+            how='left'
+        )
 
-        inventory_df = pd.merge(inventory_df, last_cu_filho, 
-                                left_on='Codigo_Inv', right_on='Filho', how='left')
+        # Merge avg CU by Filho (the PF code itself)
+        inventory_df = pd.merge(
+            inventory_df,
+            avg_cu_filho,
+            left_on='Codigo_Inv',
+            right_on='Filho',
+            how='left'
+        )
 
+        # Numeric safety
         inventory_df['Quantidade_Inv'] = pd.to_numeric(inventory_df['Quantidade_Inv'], errors='coerce').fillna(0)
-        inventory_df['UCP'] = pd.to_numeric(inventory_df['UCP'], errors='coerce').fillna(0)
-        inventory_df['UCF'] = pd.to_numeric(inventory_df['UCF'], errors='coerce').fillna(0)
+        inventory_df['UCP'] = pd.to_numeric(inventory_df['UCP'], errors='coerce')
+        inventory_df['UCF'] = pd.to_numeric(inventory_df['UCF'], errors='coerce')
 
-        inventory_df['UCU'] = inventory_df.apply(lambda row: row['UCP'] if row['UCP'] > 0 else row['UCF'], axis=1)
-        inventory_df['UCT'] = inventory_df['UCU'] * inventory_df['Quantidade_Inv']
+        # Prefer cost from parent; fallback to child
+        inventory_df['UCU'] = np.where(inventory_df['UCP'].notna(), inventory_df['UCP'], inventory_df['UCF'])
+
+        # Total cost
+        inventory_df['UCT'] = inventory_df['UCU'].fillna(0) * inventory_df['Quantidade_Inv']
 
         return inventory_df
 
@@ -199,8 +252,10 @@ def process_all_months():
                 continue
 
             # Step 2: Lookup CU values and calculate UCU and UCT
-            cutoff_date = pd.Timestamp(year=year, month=month, day=1) + pd.offsets.MonthEnd(0)
-            final_df = lookup_cu_values(inventory_df, cutoff_date)
+            # cutoff_date = pd.Timestamp(year=year, month=month, day=1) + pd.offsets.MonthEnd(0)
+            cutoff_code = int(f"{str(year)[-2:]}{month:02d}")  # e.g., 2506 for June 2025
+            # final_df = lookup_cu_values(inventory_df, cutoff_date)
+            final_df = lookup_cu_values(inventory_df, cutoff_code)
 
             if final_df is None:
                 continue
