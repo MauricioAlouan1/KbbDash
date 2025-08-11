@@ -18,7 +18,8 @@ SERIES_LIST = [
     "Serie 5 - Olist",
     "Serie 6 - Meli",
     "Serie 7 - Amazon",
-    "Serie 8 - Magalu Full"
+    "Serie 8 - Magalu Full",
+    "Serie 9 - Shopee Full"
 ]
 
 def process_series(month, year, series):
