@@ -27,6 +27,31 @@ else:
     base_dir = None  # Or set a default path if appropriate
 #print("Base directory set to:", base_dir)
 
+def _strip_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Trim trailing/leading spaces from all column names."""
+    df.columns = df.columns.map(lambda c: c.strip() if isinstance(c, str) else c)
+    return df
+
+def _strip_code_values(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Trim spaces from common 'code' columns used nos merges (estoque/transfer/ML etc.).
+    Não altera dtypes além de garantir string para aplicar strip().
+    """
+    candidate_cols = [
+        "Código", "Codigo", "Código do Produto", "Codigo do Produto",
+        "CodProd", "SKU"
+    ]
+    for col in df.columns:
+        if col in candidate_cols:
+            df[col] = df[col].astype(str).str.strip()
+    return df
+
+def _normalize_basic(df: pd.DataFrame) -> pd.DataFrame:
+    """Aplicar normalização básica (nomes + códigos)."""
+    df = _strip_column_names(df)
+    df = _strip_code_values(df)
+    return df
+
 def find_header_row(filepath, header_name):
     """Utility function to find the header row index using pandas."""
     for i, row in pd.read_excel(filepath, header=None).iterrows():
@@ -430,6 +455,8 @@ def load_and_clean_data(filepath, processor, header_name, extract_hyperlinks=Fal
         # Continue with the original data loading method
         header_row_index = find_header_row(filepath, header_name)
         data = pd.read_excel(filepath, header=header_row_index)    
+         # 🔧 NOVO: normalizar nomes e códigos imediatamente após o carregamento
+        data = _normalize_basic(data)
     # Extract month and year from the filename and add as a new column if necessary
     if processor in [process_B_Estoq, process_O_CtasAPagar, process_O_Estoq]:
         month_year = int(extract_month_year_from_filename(filepath))
@@ -567,8 +594,10 @@ def extract_hyperlinks_data(filepath, header_name):
                 row_data.append(cell.value)
             row_data.append(hyperlink_value)
             data_rows.append(row_data)
-
-    return pd.DataFrame(data_rows, columns=headers)
+    # 🔧 Novo: cria o DF, aplica normalização e retorna
+    df = pd.DataFrame(data_rows, columns=headers)
+    df = _normalize_basic(df)
+    return df
 
 def save_cleaned_data(data, output_filepath):
     """Save the cleaned data to a new Excel file."""

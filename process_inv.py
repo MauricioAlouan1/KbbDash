@@ -45,7 +45,7 @@ else:
 
 # Define the date range variables
 start_year = 2025
-start_month = 5
+start_month = 7
 end_year = start_year
 end_month = start_month
 
