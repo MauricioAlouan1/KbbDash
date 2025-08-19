@@ -143,6 +143,81 @@ def detect_encoding_and_delimiter(file_path):
     print(f"✅ Detected encoding: {encoding}, Delimiter: '{delimiter}'")
     return encoding, delimiter
 
+def process_KON_RelGeral(data):
+    """
+    Light pre-processing for Kon_RelGeral_*:
+    - Normalize columns, types
+    - Add flags/keys (HasSKU, OrderKey, AnoMes)
+    - (Optional) Attach small category dictionary (T_KonCats.xlsx)
+    """
+    # Basic normalization
+    data = _normalize_basic(data).copy()
+
+    # Keep only the “Extrato Geral” sheet columns we actually need (safe default: keep all)
+    # If you want to trim, uncomment and adjust:
+    # keep_cols = ['CONCILIACAO','ID','REF_PEDIDO','CANAL','CONTA','DATA_PEDIDO','NUM_NF','DATA_NF',
+    #              'SKU','DATA_PREVISTA','DATA_REPASSE','TP_LANCAMENTO','VALOR_PREVISTO','VALOR_REPASSE',
+    #              'DIFERENCA','ETAPA','OBS_LANCAMENTO','CATEGORIA_LANCAMENTO']
+    # data = data[[c for c in keep_cols if c in data.columns]]
+
+    # Dates → datetime (best-effort)
+    for dc in ['DATA_PEDIDO','DATA_NF','DATA_PREVISTA','DATA_REPASSE']:
+        if dc in data.columns:
+            data[dc] = pd.to_datetime(data[dc], errors='coerce')
+
+    # Numeric money fields (fill missing with 0.0)
+    for mc in ['VALOR_PREVISTO','VALOR_REPASSE','DIFERENCA']:
+        if mc in data.columns:
+            data[mc] = pd.to_numeric(data[mc], errors='coerce').fillna(0.0)
+
+    # SKU normalize + flag
+    if 'SKU' in data.columns:
+        data['SKU'] = data['SKU'].astype(str).str.strip()
+        data['SKU'] = data['SKU'].replace({'nan': pd.NA, '': pd.NA})
+        data['HasSKU'] = data['SKU'].notna()
+    else:
+        data['HasSKU'] = False
+
+    # Order key
+    if 'REF_PEDIDO' in data.columns:
+        data['OrderKey'] = data['REF_PEDIDO'].astype(str).str.strip()
+    else:
+        data['OrderKey'] = pd.NA
+
+    # AnoMes (use filename, like other processors)
+    # Note: AnoMes is YYMM string, consistent with your pipeline
+    if 'AnoMes' not in data.columns:
+        data['AnoMes'] = extract_month_year_from_filename("Kon_RelGeral_XXXX_YY.xlsx")  # placeholder
+    # The real AnoMes is set in load_and_clean_data() after reading filename.
+    # To ensure it is, we’ll add it post-load in load_and_clean_data() section below.
+
+    # OPTIONAL light join: attach category dictionary
+    try:
+        tpath = os.path.join(base_dir, 'Tables', 'T_KonCats.xlsx')
+        if os.path.exists(tpath):
+            tcat = pd.read_excel(tpath)
+            # Normalize dictionary column names
+            tcat = _normalize_basic(tcat)
+            # Expected columns in your file: TP_Lancamento, TP_Lancamento_Grupo, TP_Lancamento_Gr1
+            if 'TP_LANCAMENTO' in data.columns and 'TP_Lancamento' in tcat.columns:
+                data = data.merge(
+                    tcat[['TP_Lancamento','TP_Lancamento_Grupo','TP_Lancamento_Gr1']],
+                    left_on='TP_LANCAMENTO',
+                    right_on='TP_Lancamento',
+                    how='left'
+                )
+                # Clean up after merge
+                if 'TP_Lancamento' in data.columns:
+                    data.drop(columns=['TP_Lancamento'], inplace=True)
+            # Fill any unmapped rows
+            for col in ['TP_Lancamento_Grupo','TP_Lancamento_Gr1']:
+                if col in data.columns:
+                    data[col] = data[col].fillna('ZZZ')
+    except Exception as e:
+        print(f"⚠️ Could not attach T_KonCats.xlsx: {e}")
+
+    return data
+
 def process_MGK_Pacotes_CSV(file_path):
     """Process MGK_Pacotes CSV files by handling encoding, delimiter, and data formatting."""
 
@@ -458,7 +533,7 @@ def load_and_clean_data(filepath, processor, header_name, extract_hyperlinks=Fal
          # 🔧 NOVO: normalizar nomes e códigos imediatamente após o carregamento
         data = _normalize_basic(data)
     # Extract month and year from the filename and add as a new column if necessary
-    if processor in [process_B_Estoq, process_O_CtasAPagar, process_O_Estoq]:
+    if processor in [process_B_Estoq, process_O_CtasAPagar, process_O_Estoq, process_KON_RelGeral]:
         month_year = int(extract_month_year_from_filename(filepath))
         data['AnoMes'] = month_year
     # Process the data using the specified processor function
@@ -508,7 +583,8 @@ def check_and_process_files():
         'MLA_Vendas': (process_MLK_Vendas, "N.º de venda", True),  # New entry, same process as MLK_Vendas
         'T_EstTrans': (process_T_EstTrans, "CodProd", False),
         "MGK_Extrato": (process_MGK_Extrato, "Relatório solicitado em: Data/Hora", False),
-        "SHK_Extrato": (process_SHK_Extrato, "Data", False)
+        "SHK_Extrato": (process_SHK_Extrato, "Data", False),
+        'Kon_RelGeral': (process_KON_RelGeral, "CONCILIACAO", False)
     }
     for subdir, dirs, files in os.walk(raw_dir):
         for file in files:
