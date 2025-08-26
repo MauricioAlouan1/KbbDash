@@ -759,7 +759,7 @@ def merge_data_lastcost(all_data, df1_name, df1_product_col, df1_date_col, df2_n
     df2_date_col = df2_date_col.upper()
     df2_cost_col = df2_cost_col.upper()
     new_col_name = new_col_name.upper()
-
+    
     if df1_name in all_data and df2_name in all_data:
         df1 = all_data[df1_name]
         df2 = all_data[df2_name]
