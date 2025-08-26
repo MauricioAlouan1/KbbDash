@@ -321,16 +321,30 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
             df[c] = 0.0
 
     # Ordena colunas na saída final
-    cols_final = [
+    cols_base = [
         "CODPF",
         "QT_INICIAL", "CU_INICIAL", "CT_INICIAL",
         "VENDAS_2b", "VENDAS_2c",
         "QT_ENTRADAS", "CU_ENTRADAS", "CT_ENTRADAS",
         "QT_FINAL", "CU_FINAL", "CT_FINAL",
     ]
-    df = df[cols_final].copy()
+    df = df[cols_base].copy()
 
-    # Ordena por código e retorna
+    # Calculadas
+    df["QT_Diff"]     = df["QT_FINAL"] - (df["QT_INICIAL"] - df["VENDAS_2b"] - df["VENDAS_2c"] + df["QT_ENTRADAS"])
+    df["CU_Diff"]     = np.where(df["QT_FINAL"] > 0, df["CU_FINAL"] - df["CU_INICIAL"], 0)
+    df["CT_Diff_QT"]  = df["QT_Diff"] * df["CU_INICIAL"]
+    df["CT_Diff_CU"]  = np.where(
+        (df["QT_INICIAL"] > 0) & (df["QT_FINAL"] > 0),
+        df["QT_INICIAL"] * (df["CU_FINAL"] - df["CU_INICIAL"]),
+        0
+    )
+        # Arredondamento (2 casas decimais)
+    df["CU_Diff"]     = df["CU_Diff"].round(2)
+    df["CT_Diff_QT"]  = df["CT_Diff_QT"].round(2)
+    df["CT_Diff_CU"]  = df["CT_Diff_CU"].round(2)
+
+    # Ordena por código
     df["CODPF"] = df["CODPF"].astype(str).str.strip().str.upper()
     df = df.sort_values("CODPF", kind="stable").reset_index(drop=True)
     return df
@@ -352,28 +366,52 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
     if not this_dir:
         raise FileNotFoundError(f"Could not resolve base dir for {yymm_to_str(year, month)}")
 
-    out_dir = this_dir / OUTPUT_SUBDIR
+    out_dir = this_dir
     ensure_dir(out_dir)
 
     report = reconcile_inventory(year, month)
 
     # Save CSV and XLSX
     tag = yymm_to_str(year, month)
-    csv_path = out_dir / f"Recon_{tag}.csv"
     xlsx_path = out_dir / f"Recon_{tag}.xlsx"
 
-    report.to_csv(csv_path, index=False, encoding="utf-8-sig")
     if save_excel:
         with pd.ExcelWriter(xlsx_path, engine="xlsxwriter") as writer:
             report.to_excel(writer, index=False, sheet_name="Recon")
-            # Basic formatting
+
             wb = writer.book
             ws = writer.sheets["Recon"]
-            for i, col in enumerate(report.columns):
-                width = max(12, min(32, report[col].astype(str).str.len().max() if not report.empty else 12))
-                ws.set_column(i, i, width)
 
-    print(f"Saved: {csv_path}")
+            # Ativa auto-filtro
+            ws.autofilter(0, 0, report.shape[0], report.shape[1] - 1)
+
+            # Formatos
+            money_fmt      = wb.add_format({'num_format': '#,##0.00'})
+            light_gray_fmt = wb.add_format({'bg_color': '#F2F2F2'})
+            money_gray_fmt = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#F2F2F2'})
+
+            # Colunas que devem ter 2 casas decimais (exceto QT*)
+            money_cols = [
+                "CU_INICIAL", "CT_INICIAL",
+                "CU_ENTRADAS", "CT_ENTRADAS",
+                "CU_FINAL", "CT_FINAL",
+                "CU_Diff", "CT_Diff_QT", "CT_Diff_CU"
+            ]
+            # Colunas calculadas a pintar de cinza
+            gray_cols = {"QT_Diff", "CU_Diff", "CT_Diff_QT", "CT_Diff_CU"}
+
+            for idx, col in enumerate(report.columns):
+                width = max(12, min(32, report[col].astype(str).str.len().max() if not report.empty else 12))
+                if col in money_cols and col in gray_cols:
+                    fmt = money_gray_fmt
+                elif col in money_cols:
+                    fmt = money_fmt
+                elif col in gray_cols:
+                    fmt = light_gray_fmt
+                else:
+                    fmt = None
+                ws.set_column(idx, idx, width, fmt)
+
     print(f"Saved: {xlsx_path}")
     return xlsx_path
 
