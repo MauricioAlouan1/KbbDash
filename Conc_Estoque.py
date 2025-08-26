@@ -373,14 +373,14 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
 
     # Save CSV and XLSX
     tag = yymm_to_str(year, month)
-    xlsx_path = out_dir / f"Recon_{tag}.xlsx"
+    xlsx_path = out_dir / f"Conc_Estoq_{tag}.xlsx"
 
     if save_excel:
         with pd.ExcelWriter(xlsx_path, engine="xlsxwriter") as writer:
-            report.to_excel(writer, index=False, sheet_name="Recon")
+            report.to_excel(writer, index=False, sheet_name="Estoq")
 
             wb = writer.book
-            ws = writer.sheets["Recon"]
+            ws = writer.sheets["Estoq"]
 
             # Ativa auto-filtro
             ws.autofilter(0, 0, report.shape[0], report.shape[1] - 1)
