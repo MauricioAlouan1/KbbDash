@@ -26,20 +26,75 @@ from typing import List, Optional, Tuple
 # CONFIG – adjust these!
 # -----------------------
 # Two possible base folders, like your process_inv.py pattern
-BASE_DIRS: List[Path] = [
-    Path("/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/clean"),
-    Path("/Users/mauricioalouan/KBDash01/data/clean"),
+path_options = [
+    '/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/',
+    '/Users/simon/Library/CloudStorage/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data'
 ]
+for candidate in path_options:
+    if os.path.exists(candidate):
+        base_dir = candidate
+        break
+else:
+    print("None of the specified directories exist.")
+    base_dir = None
 
 # Subfolder with Tables
-TABLES_SUBPATH = "Tables"
+TABLES_SUBDIR = "Tables"
+INPUT_SUBDIR = "clean"
+OUTPUT_SUBDIR = "clean"
 
-# Output folder (inside the resolved base dir for the selected YYYY_MM)
-OUTPUT_SUBDIR = "reports"
+# <<< HARD-CODE AQUI: nomes dos arquivos (prefixos) e tabela de Entradas
+INV_PREFIX      = "R_Estoq_fdm_"     # gera "R_Estoque_fdm_YYYY_MM.xlsx"
+RESUMO_PREFIX   = "R_Resumo_"          # gera "R_Resumo_YYYY_MM.xlsx"
+ENTRADAS_FILE   = "T_Entradas.xlsx"    # dentro de TABLES_DIR
+
+# <<< HARD-CODE AQUI: nomes das ABAS
+SHEET_PT01   = "PT01"
+SHEET_ONFCI  = "O_NFCI"
+SHEET_LLPI   = "L_LPI"
+
+# <<< HARD-CODE AQUI: nomes das COLUNAS por aba/tabela
+# PT01 (estoque)
+PT01_CODE_COL = "Codigo_Inv"                # ex.: "CODPF" ou "Código do Produto"
+PT01_QTY_COL  = "Total"                     # ex.: "QT" ou "Qt_Final" ou "ESTOQUE"
+PT01_CU_COL   = "Unit Cost"                 # ex.: "Ult CU R$" ou "CU"
+PT01_CT_COL   = "Total Cost"                # ex.: "Custo Total" ou "CT" (pode deixar None e o script calcula CU*QT)
+# Se não existir, coloque None (o script calcula CT = CU*QT)
+
+# O_NFCI (vendas 2b)
+ONFCI_CODE_COL = "CODPF"               # ex.: "CODPF" ou "Código do Produto"
+ONFCI_QTY_COL  = "QTD"                  # ex.: "QT", "Quantidade", "QTD"
+
+# L_LPI (vendas 2c)
+LLPI_CODE_COL    = "CODPF"
+LLPI_QTY_COL     = "QTD"
+LLPI_STATUS_COL  = "STATUS PEDIDO"     # usado para filtrar != "CANCELADO"
+LLPI_EMPRESA_COL = "EMPRESA"           # usado para filtrar == "K"
+
+# T_Entradas (entradas do mês)
+ENTR_CODE_COL   = "Filho"              # ex.: "CODPF", "Pai"
+ENTR_QTY_COL    = "Qt"                 # ex.: "QT", "Qtde"
+ENTR_CU_COL     = "Ult CU R$"                 # ex.: "CU" (se não tiver, use None)
+ENTR_CT_COL     = "Ult CT"                 # ex.: "CT" (se não tiver, use None e calcula QT*CU)
+# Filtragem por mês:
+ENTR_ANOMES_COL = "AnoMes"             # yymm (ex.: 2507). Se não existir, use None.
+ENTR_DATE_COL   = None                 # OU nome da data (ex.: "Emissao" ou "Ultima Entrada") se preferir filtrar por data
+
+CLEAN_ROOT = os.path.join(base_dir, INPUT_SUBDIR) 
+TABLES_DIR = os.path.join(base_dir, TABLES_SUBDIR)
 
 # -----------------------
 # Helpers
 # -----------------------
+def find_existing_excel(base_path: Path, base_name: str) -> Path:
+    """
+    Tenta encontrar arquivo com base em base_name + .xlsx ou .xlsm
+    """
+    for ext in [".xlsx", ".xlsm"]:
+        candidate = base_path / f"{base_name}{ext}"
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(f"Arquivo não encontrado: {base_path}/{base_name}.xlsx ou .xlsm")
 
 def ym_to_prev(year: int, month: int) -> Tuple[int, int]:
     if month == 1:
@@ -55,20 +110,18 @@ def find_existing_file(candidates: List[Path]) -> Optional[Path]:
             return p
     return None
 
-def resolve_month_dir(year: int, month: int) -> Optional[Path]:
-    tag = yymm_to_str(year, month)
-    # Many users keep month folders named as YYYY_MM under each base dir
-    candidates = [base / tag for base in BASE_DIRS]
-    return find_existing_file(candidates)
+def resolve_month_dir(year: int, month: int) -> Path:
+    tag = f"{year:04d}_{month:02d}"
+    p = Path(os.path.join(CLEAN_ROOT, tag))
+    if not p.exists():
+        raise FileNotFoundError(f"Pasta do mês não encontrada: {p}")
+    return p
 
-def resolve_tables_dir(year: int, month: int) -> Optional[Path]:
-    # Tables might sit at the base root or inside YYYY_MM; try both patterns for both base dirs
-    tag = yymm_to_str(year, month)
-    candidates: List[Path] = []
-    for base in BASE_DIRS:
-        candidates.append(base / TABLES_SUBPATH)            # e.g., .../clean/Tables
-        candidates.append(base / tag / TABLES_SUBPATH)      # e.g., .../clean/2025_07/Tables
-    return find_existing_file(candidates)
+def resolve_tables_dir(year: int, month: int) -> Path:
+    p = Path(os.path.join(TABLES_DIR))
+    if not p.exists():
+        raise FileNotFoundError(f"Pasta das Tabelas não encontrada: {p}")
+    return p
 
 def read_excel_safe(path: Path, sheet_name: Optional[str] = None) -> pd.DataFrame:
     try:
@@ -100,260 +153,187 @@ def ensure_dir(p: Path) -> None:
 # -----------------------
 
 def load_inventory_pt01(file_path: Path) -> pd.DataFrame:
-    """
-    Reads PT01 sheet and normalizes to columns: CODPF, QT, CU, CT
-    Tries multiple common header variants.
-    """
-    df = read_excel_safe(file_path, sheet_name="PT01")
-    # Try to locate code column
-    code_col = first_existing_col(df, ["CODPF", "Código do Produto", "Codigo do Produto", "Pai", "CODIGO", "CÓDIGO"])
-    if not code_col:
-        raise ValueError(f"CODE column not found in PT01 of {file_path.name}")
+    df = pd.read_excel(file_path, sheet_name=SHEET_PT01)
 
-    # Quantity column candidates
-    qty_col = first_existing_col(df, ["QT", "QTDE", "QUANTIDADE", "Qt", "Quantidade", "Qt_Final", "ESTOQUE"])
-    # Unit cost column candidates
-    cu_col  = first_existing_col(df, ["CU", "CUSTO UNIT", "CUSTO_UNIT", "Ult CU R$", "Custo Unitário", "CUSTO UNITÁRIO"])
-    # Total cost column candidates
-    ct_col  = first_existing_col(df, ["CT", "CUSTO TOT", "CUSTO_TOTAL", "Custo Total", "CUSTO TOTAL", "Valor Estoque"])
+    # <<< HARD-CODE — usa exatamente as colunas definidas no topo
+    code_col = PT01_CODE_COL
+    qty_col  = PT01_QTY_COL
+    cu_col   = PT01_CU_COL
+    ct_col   = PT01_CT_COL
 
-    if qty_col is None:
-        # Sometimes only total exists; assume 0 qty if missing
-        qty_col = "QT_FALLBACK"
-        df[qty_col] = 0
-    if cu_col is None:
-        cu_col = "CU_FALLBACK"
-        df[cu_col] = 0.0
-    if ct_col is None:
-        # compute CT if we have CU*QT
-        ct_col = "CT_COMPUTED"
-        df[ct_col] = coerce_numeric(df[cu_col]) * coerce_numeric(df[qty_col])
+    # Normaliza tipos
+    def _num(s):
+        return pd.to_numeric(df[s], errors="coerce").fillna(0) if s else None
 
-    out = pd.DataFrame({
-        "CODPF": norm_code(df[code_col]),
-        "QT": coerce_numeric(df[qty_col]),
-        "CU": coerce_numeric(df[cu_col]),
-        "CT": coerce_numeric(df[ct_col]),
-    })
-    # If CT missing or zero but we have CU & QT, recompute
-    need_ct = (out["CT"] == 0) & ((out["CU"] != 0) | (out["QT"] != 0))
-    out.loc[need_ct, "CT"] = out.loc[need_ct, "CU"] * out.loc[need_ct, "QT"]
-    return out.groupby("CODPF", as_index=False).agg({"QT":"sum", "CT":"sum", "CU":"mean"})
+    CODPF = df[code_col].astype(str).str.strip().str.upper()
+    QT = _num(qty_col) if qty_col else pd.Series(0, index=df.index, dtype="float")
+    CU = _num(cu_col) if cu_col else pd.Series(0.0, index=df.index, dtype="float")
+    if ct_col:
+        CT = _num(ct_col)
+    else:
+        CT = QT * CU  # calcula se não veio pronto
+
+    out = pd.DataFrame({"CODPF": CODPF, "QT": QT, "CU": CU, "CT": CT})
+    # se CT = 0 mas QT e CU existem, recomputa
+    m = (out["CT"] == 0) & ((out["QT"] != 0) | (out["CU"] != 0))
+    out.loc[m, "CT"] = out.loc[m, "QT"] * out.loc[m, "CU"]
+
+    # Consolida por item
+    agg = out.groupby("CODPF", as_index=False).agg({"QT":"sum", "CT":"sum"})
+    agg["CU"] = np.where(agg["QT"] != 0, agg["CT"]/agg["QT"], 0.0)
+    return agg
 
 def load_sales_onfci(resumo_path: Path) -> pd.DataFrame:
-    """
-    Reads R_Resumo_YYYY_MM.xlsx sheet 'O_NFCI' and returns VENDAS_2b per CODPF.
-    """
-    df = read_excel_safe(resumo_path, sheet_name="O_NFCI")
-    code_col = first_existing_col(df, ["CODPF", "Código do Produto", "Codigo do Produto", "Pai", "CODIGO"])
-    if not code_col:
-        # fallback: try SKU or Item fields sometimes present
-        code_col = first_existing_col(df, ["SKU", "Item", "Produto"])
-    if not code_col:
-        raise ValueError(f"CODE column not found in O_NFCI of {resumo_path.name}")
+    df = pd.read_excel(resumo_path, sheet_name=SHEET_ONFCI)
 
-    qty_col = first_existing_col(df, ["QT", "QTDE", "QUANTIDADE", "Quantidade", "Qt"])
-    if not qty_col:
-        # Some reports store sales quantity under different field
-        qty_col = first_existing_col(df, ["QTD", "Qde"])
-    if not qty_col:
-        raise ValueError(f"Quantity column not found in O_NFCI of {resumo_path.name}")
+    CODPF = df[ONFCI_CODE_COL].astype(str).str.strip().str.upper()
+    QT    = pd.to_numeric(df[ONFCI_QTY_COL], errors="coerce").fillna(0)
 
-    out = pd.DataFrame({
-        "CODPF": norm_code(df[code_col]),
-        "VENDAS_2b": coerce_numeric(df[qty_col]),
-    })
+    out = pd.DataFrame({"CODPF": CODPF, "VENDAS_2b": QT})
     return out.groupby("CODPF", as_index=False).agg({"VENDAS_2b":"sum"})
 
 def load_sales_llpi(resumo_path: Path) -> pd.DataFrame:
-    """
-    Reads R_Resumo_YYYY_MM.xlsx sheet 'L_LPI', filters STATUS PEDIDO != 'CANCELADO' and EMPRESA == 'K',
-    and returns VENDAS_2c per CODPF.
-    """
-    df = read_excel_safe(resumo_path, sheet_name="L_LPI")
+    df = pd.read_excel(resumo_path, sheet_name=SHEET_LLPI)
 
-    # Apply filters
-    status_col  = first_existing_col(df, ["STATUS PEDIDO", "Status Pedido", "STATUS_PEDIDO", "Status"])
-    empresa_col = first_existing_col(df, ["EMPRESA", "Empresa"])
-    if status_col:
-        df = df[df[status_col].astype(str).str.upper() != "CANCELADO"]
-    if empresa_col:
-        df = df[df[empresa_col].astype(str).str.upper() == "K"]
+    # Filtros fixos
+    df = df[df[LLPI_STATUS_COL].astype(str).str.upper() != "CANCELADO"]
+    df = df[df[LLPI_EMPRESA_COL].astype(str).str.upper() == "K"]
 
-    code_col = first_existing_col(df, ["CODPF", "Código do Produto", "Codigo do Produto", "Pai", "CODIGO", "SKU"])
-    if not code_col:
-        raise ValueError(f"CODE column not found in L_LPI of {resumo_path.name}")
+    CODPF = df[LLPI_CODE_COL].astype(str).str.strip().str.upper()
+    QT    = pd.to_numeric(df[LLPI_QTY_COL], errors="coerce").fillna(0)
 
-    qty_col = first_existing_col(df, ["QT", "QTDE", "QUANTIDADE", "Quantidade", "Qt", "QTD", "Qde"])
-    if not qty_col:
-        raise ValueError(f"Quantity column not found in L_LPI of {resumo_path.name}")
-
-    out = pd.DataFrame({
-        "CODPF": norm_code(df[code_col]),
-        "VENDAS_2c": coerce_numeric(df[qty_col]),
-    })
+    out = pd.DataFrame({"CODPF": CODPF, "VENDAS_2c": QT})
     return out.groupby("CODPF", as_index=False).agg({"VENDAS_2c":"sum"})
 
 def load_entradas(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
-    """
-    Reads Tables/T_Entradas.xlsx, filters to target YYYY_MM (if present via 'AnoMes' or date col),
-    and returns arrivals per CODPF: QT_ENTRADAS, CU_ENTRADAS (weighted avg), CT_ENTRADAS.
-    """
-    entradas_path = tables_dir / "T_Entradas.xlsx"
+    entradas_path = tables_dir / ENTRADAS_FILE
     if not entradas_path.exists():
-        # Some teams keep a CSV backup
-        csv_alt = tables_dir / "T_Entradas.csv"
-        if not csv_alt.exists():
-            raise FileNotFoundError(f"Could not find T_Entradas.xlsx or .csv under {tables_dir}")
-        df = pd.read_csv(csv_alt)
+        raise FileNotFoundError(f"Arquivo de entradas não encontrado: {entradas_path}")
+
+    df = pd.read_excel(entradas_path)
+
+    # Filtragem por mês
+    if ENTR_ANOMES_COL:
+        target = int(f"{year%100:02d}{month:02d}")  # yymm
+        df = df[pd.to_numeric(df[ENTR_ANOMES_COL], errors="coerce") == target]
+    elif ENTR_DATE_COL:
+        parsed = pd.to_datetime(df[ENTR_DATE_COL], errors="coerce", dayfirst=True, infer_datetime_format=True)
+        df = df[(parsed.dt.year == year) & (parsed.dt.month == month)]
+    # senão, não filtra (usa tudo)
+
+    CODPF = df[ENTR_CODE_COL].astype(str).str.strip().str.upper()
+    QT    = pd.to_numeric(df[ENTR_QTY_COL], errors="coerce").fillna(0)
+
+    if ENTR_CT_COL:
+        CT = pd.to_numeric(df[ENTR_CT_COL], errors="coerce").fillna(0)
     else:
-        df = read_excel_safe(entradas_path)
+        if ENTR_CU_COL:
+            CU_src = pd.to_numeric(df[ENTR_CU_COL], errors="coerce").fillna(0)
+            CT = QT * CU_src
+        else:
+            CT = pd.Series(0.0, index=df.index, dtype="float")
 
-    # CODE candidates
-    code_col = first_existing_col(df, ["CODPF", "Pai", "Código do Produto", "Codigo do Produto", "CODIGO"])
-    if not code_col:
-        # occasionally arrives as 'Produto' or 'SKU'
-        code_col = first_existing_col(df, ["Produto", "SKU"])
-    if not code_col:
-        raise ValueError("CODE column not found in T_Entradas")
-
-    # Quantity candidates
-    qty_col = first_existing_col(df, ["QT", "Qtde", "QUANTIDADE", "Quantidade", "QTD", "Qde", "ENT_QT"])
-    if not qty_col:
-        raise ValueError("Quantity column not found in T_Entradas")
-
-    # Unit cost candidates
-    cu_col = first_existing_col(df, ["CU", "Custo Unit", "Custo Unitário", "CU R$", "CustoUnit", "UnitCost"])
-    # Total cost candidates
-    ct_col = first_existing_col(df, ["CT", "Custo Total", "Valor Total", "CT R$", "TotalCost"])
-
-    # Filter to target month if possible
-    anomes_col = first_existing_col(df, ["AnoMes", "ANOMES"])
-    if anomes_col:
-        target = int(f"{year%100:02d}{month:02d}")  # yymm style
-        df = df[pd.to_numeric(df[anomes_col], errors="coerce") == target]
-    else:
-        # Try by date column, if present
-        date_col = first_existing_col(df, ["Data", "DATA", "Emissao", "EMISSAO", "Ultima Entrada"])
-        if date_col:
-            # Parse month/year
-            parsed = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True, infer_datetime_format=True)
-            df = df[ (parsed.dt.year == year) & (parsed.dt.month == month) ]
-
-    work = pd.DataFrame({
-        "CODPF": norm_code(df[code_col]),
-        "QT": coerce_numeric(df[qty_col]),
-    })
-    if cu_col:
-        work["CU"] = coerce_numeric(df[cu_col])
-    else:
-        work["CU"] = 0.0
-    if ct_col:
-        work["CT"] = coerce_numeric(df[ct_col])
-    else:
-        # compute CT if missing
-        work["CT"] = work["QT"] * work["CU"]
-
-    # Aggregate per item, compute weighted avg CU
+    work = pd.DataFrame({"CODPF": CODPF, "QT": QT, "CT": CT})
     agg = work.groupby("CODPF", as_index=False).agg({"QT":"sum", "CT":"sum"})
-    agg["CU"] = np.where(agg["QT"] != 0, agg["CT"] / agg["QT"], 0.0)
-    agg = agg.rename(columns={
-        "QT": "QT_ENTRADAS",
-        "CU": "CU_ENTRADAS",
-        "CT": "CT_ENTRADAS",
-    })
-    return agg
+    agg["CU"] = np.where(agg["QT"] != 0, agg["CT"]/agg["QT"], 0.0)
+    return agg.rename(columns={"QT":"QT_ENTRADAS","CU":"CU_ENTRADAS","CT":"CT_ENTRADAS"})
 
 # -----------------------
 # Main reconciliation
 # -----------------------
 
 def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
-    prev_y, prev_m = ym_to_prev(year, month)
+    """
+    Conciliação de estoque para (year, month).
+    Depende das funções/utilitários já definidos:
+      - resolve_month_dir, resolve_tables_dir
+      - load_inventory_pt01, load_sales_onfci, load_sales_llpi, load_entradas
+      - INV_PREFIX, RESUMO_PREFIX
+    Retorna DataFrame com colunas:
+      CODPF, QT_INICIAL, CU_INICIAL, CT_INICIAL, VENDAS_2b, VENDAS_2c,
+      QT_ENTRADAS, CU_ENTRADAS, CT_ENTRADAS, QT_FINAL, CU_FINAL, CT_FINAL
+    """
+    # Mês anterior
+    prev_y = year if month > 1 else year - 1
+    prev_m = month - 1 if month > 1 else 12
 
-    this_tag = yymm_to_str(year, month)
-    prev_tag = yymm_to_str(prev_y, prev_m)
+    this_tag = f"{year:04d}_{month:02d}"
+    prev_tag = f"{prev_y:04d}_{prev_m:02d}"
 
-    # Resolve month dirs
+    # Pastas hard-coded
     this_dir = resolve_month_dir(year, month)
-    if not this_dir:
-        raise FileNotFoundError(f"Could not resolve month dir for {this_tag} in any BASE_DIRS")
-
     prev_dir = resolve_month_dir(prev_y, prev_m)
-    if not prev_dir:
-        raise FileNotFoundError(f"Could not resolve month dir for {prev_tag} in any BASE_DIRS")
-
     tables_dir = resolve_tables_dir(year, month)
-    if not tables_dir:
-        raise FileNotFoundError("Could not resolve Tables directory in any BASE_DIRS")
 
-    # Files
-    prev_inv_path = prev_dir / f"R_Estoque_fdm_{prev_tag}.xlsx"
-    this_inv_path = this_dir / f"R_Estoque_fdm_{this_tag}.xlsx"
-    resumo_path   = this_dir / f"R_Resumo_{this_tag}.xlsx"
+    # Arquivos hard-coded a partir dos prefixos
+    prev_inv_path = find_existing_excel(prev_dir, f"{INV_PREFIX}{prev_tag}")
+    this_inv_path = find_existing_excel(this_dir,  f"{INV_PREFIX}{this_tag}")
+    resumo_path   = find_existing_excel(this_dir,  f"{RESUMO_PREFIX}{this_tag}")
 
     for p in [prev_inv_path, this_inv_path, resumo_path]:
         if not p.exists():
-            raise FileNotFoundError(f"Missing file: {p}")
+            raise FileNotFoundError(f"Arquivo não encontrado: {p}")
 
-    # Load datasets
-    inv_prev = load_inventory_pt01(prev_inv_path)   # CODPF, QT, CU, CT (but CU here is avg; we trust CT)
+    # Carrega dados
+    inv_prev = load_inventory_pt01(prev_inv_path)   # CODPF, QT, CU, CT
     inv_this = load_inventory_pt01(this_inv_path)   # CODPF, QT, CU, CT
     vendas_b = load_sales_onfci(resumo_path)        # CODPF, VENDAS_2b
     vendas_c = load_sales_llpi(resumo_path)         # CODPF, VENDAS_2c
     entrs    = load_entradas(tables_dir, year, month)  # CODPF, QT_ENTRADAS, CU_ENTRADAS, CT_ENTRADAS
 
-    # Normalize inventory columns to desired names
-    inv_prev = inv_prev.rename(columns={"QT":"QT_INICIAL", "CU":"CU_INICIAL", "CT":"CT_INICIAL"})
-    inv_this = inv_this.rename(columns={"QT":"QT_FINAL",   "CU":"CU_FINAL",   "CT":"CT_FINAL"})
+    # Renomeia inventários p/ INICIAL/FINAL
+    inv_prev = inv_prev.rename(columns={"QT": "QT_INICIAL", "CU": "CU_INICIAL", "CT": "CT_INICIAL"})
+    inv_this = inv_this.rename(columns={"QT": "QT_FINAL",   "CU": "CU_FINAL",   "CT": "CT_FINAL"})
 
-    # Merge universe of items
-    universe = (
-        pd.DataFrame({"CODPF": pd.Series(dtype=str)})
-        .pipe(lambda df:_merge_outer(df, inv_prev, "inv_prev"))
-        .pipe(lambda df:_merge_outer(df, inv_this, "inv_this"))
-        .pipe(lambda df:_merge_outer(df, vendas_b, "vendas_b"))
-        .pipe(lambda df:_merge_outer(df, vendas_c, "vendas_c"))
-        .pipe(lambda df:_merge_outer(df, entrs,    "entrs"))
-    )
+    # Merge universo
+    # Começa pelo conjunto que sempre existe (inv_prev) e vai encostando os demais
+    df = inv_prev.copy()
+    for add in [inv_this, vendas_b, vendas_c, entrs]:
+        if add is not None and not add.empty:
+            df = pd.merge(df, add, on="CODPF", how="outer")
+    if "CODPF" not in df.columns:
+        # Caso extremo (todas as fontes vazias): força coluna
+        df["CODPF"] = pd.Series(dtype=str)
 
-    # Fill NaNs with 0 where numeric
-    numeric_cols = ["QT_INICIAL","CU_INICIAL","CT_INICIAL",
-                    "VENDAS_2b","VENDAS_2c",
-                    "QT_ENTRADAS","CU_ENTRADAS","CT_ENTRADAS",
-                    "QT_FINAL","CU_FINAL","CT_FINAL"]
-    for c in numeric_cols:
-        if c in universe.columns:
-            universe[c] = coerce_numeric(universe[c])
+    # Garante tipos numéricos e preenche NaN
+    num_cols = [
+        "QT_INICIAL", "CU_INICIAL", "CT_INICIAL",
+        "VENDAS_2b", "VENDAS_2c",
+        "QT_ENTRADAS", "CU_ENTRADAS", "CT_ENTRADAS",
+        "QT_FINAL", "CU_FINAL", "CT_FINAL",
+    ]
+    for c in num_cols:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
 
-    # If CT missing but QT & CU present, compute
-    if "CT_INICIAL" in universe.columns:
-        m = (universe["CT_INICIAL"]==0) & ((universe["QT_INICIAL"]!=0) | (universe["CU_INICIAL"]!=0))
-        universe.loc[m, "CT_INICIAL"] = universe.loc[m, "QT_INICIAL"] * universe.loc[m, "CU_INICIAL"]
-    if "CT_FINAL" in universe.columns:
-        m = (universe["CT_FINAL"]==0) & ((universe["QT_FINAL"]!=0) | (universe["CU_FINAL"]!=0))
-        universe.loc[m, "CT_FINAL"] = universe.loc[m, "QT_FINAL"] * universe.loc[m, "CU_FINAL"]
+    # Recalcula CT se vier 0 com QT/CU disponíveis
+    if "CT_INICIAL" in df.columns:
+        m = (df["CT_INICIAL"] == 0) & ((df["QT_INICIAL"] != 0) | (df["CU_INICIAL"] != 0))
+        df.loc[m, "CT_INICIAL"] = df.loc[m, "QT_INICIAL"] * df.loc[m, "CU_INICIAL"]
 
-    # Ensure sales columns exist
-    for c in ["VENDAS_2b","VENDAS_2c"]:
-        if c not in universe.columns:
-            universe[c] = 0.0
+    if "CT_FINAL" in df.columns:
+        m = (df["CT_FINAL"] == 0) & ((df["QT_FINAL"] != 0) | (df["CU_FINAL"] != 0))
+        df.loc[m, "CT_FINAL"] = df.loc[m, "QT_FINAL"] * df.loc[m, "CU_FINAL"]
 
-    # Ensure entradas columns exist
-    for c in ["QT_ENTRADAS","CU_ENTRADAS","CT_ENTRADAS"]:
-        if c not in universe.columns:
-            universe[c] = 0.0
+    # Garante existência das colunas pedidas
+    for c in num_cols:
+        if c not in df.columns:
+            df[c] = 0.0
 
-    # Order and return
-    cols = ["CODPF", "QT_INICIAL", "CU_INICIAL", "CT_INICIAL",
-            "VENDAS_2b", "VENDAS_2c",
-            "QT_ENTRADAS", "CU_ENTRADAS", "CT_ENTRADAS",
-            "QT_FINAL", "CU_FINAL", "CT_FINAL"]
-    # Some items might be missing; reindex safely
-    existing = [c for c in cols if c in universe.columns]
-    out = universe[["CODPF"] + [c for c in cols if c in existing and c!="CODPF"]].copy()
-    out = out.sort_values("CODPF", kind="stable").reset_index(drop=True)
-    return out
+    # Ordena colunas na saída final
+    cols_final = [
+        "CODPF",
+        "QT_INICIAL", "CU_INICIAL", "CT_INICIAL",
+        "VENDAS_2b", "VENDAS_2c",
+        "QT_ENTRADAS", "CU_ENTRADAS", "CT_ENTRADAS",
+        "QT_FINAL", "CU_FINAL", "CT_FINAL",
+    ]
+    df = df[cols_final].copy()
+
+    # Ordena por código e retorna
+    df["CODPF"] = df["CODPF"].astype(str).str.strip().str.upper()
+    df = df.sort_values("CODPF", kind="stable").reset_index(drop=True)
+    return df
 
 def _merge_outer(acc: pd.DataFrame, df: pd.DataFrame, tag: str) -> pd.DataFrame:
     # Expect df has CODPF and some measures
@@ -411,7 +391,7 @@ if __name__ == "__main__":
         now = datetime.now()
         print("Year and/or month not provided.")
         year = int(input(f"Enter year (default {now.year}): ") or now.year)
-        month = int(input(f"Enter month [1-12] (default {now.month}): ") or now.month)
+        month = int(input(f"Enter month [1-12] (default {now.month -1}): ") or (now.month -1))
     else:
         year, month = args.year, args.month
 
