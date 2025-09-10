@@ -331,6 +331,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     df = df[cols_base].copy()
 
     # Calculadas
+    df["Vendas_Tot"]  = df["VENDAS_2b"] + df["VENDAS_2c"]
     df["QT_Diff"]     = df["QT_FINAL"] - (df["QT_INICIAL"] - df["VENDAS_2b"] - df["VENDAS_2c"] + df["QT_ENTRADAS"])
     df["CU_Diff"]     = np.where(df["QT_FINAL"] > 0, df["CU_FINAL"] - df["CU_INICIAL"], 0)
     df["CT_Diff_QT"]  = df["QT_Diff"] * df["CU_INICIAL"]
