@@ -261,6 +261,50 @@ def process_MGK_Pacotes_CSV(file_path):
     print("✅ MGK_Pacotes CSV processing completed with all numeric fields correctly formatted.")
     return data
 
+def process_MLK_ExtLib(data: pd.DataFrame) -> pd.DataFrame:
+    """Process MLK_ExtLib files (CSV or XLSX) into a standardized format for downstream merges."""
+
+    # --- Normalize column names ---
+    rename_map = {
+        "RELEASE_DATE": "DATE",   # some exports use RELEASE_DATE
+        # add other known variants here if needed
+    }
+    data.rename(columns=rename_map, inplace=True)
+
+    # ✅ Exclude unwanted rows
+    if "RECORD_TYPE" in data.columns:
+        data = data[~data["RECORD_TYPE"].isin(["initial_available_balance", "total"])].copy()
+
+    # ✅ Convert DATE
+    if "DATE" in data.columns:
+        data["DATE"] = pd.to_datetime(data["DATE"], errors="coerce", dayfirst=True)
+        data["DATE"] = data["DATE"].dt.tz_localize(None)
+
+    # ✅ Numeric columns
+    numeric_columns = [
+        "NET_CREDIT_AMOUNT", "NET_DEBIT_AMOUNT", "GROSS_AMOUNT",
+        "SELLER_AMOUNT", "MP_FEE_AMOUNT", "FINANCING_FEE_AMOUNT", "SHIPPING_FEE_AMOUNT", "TAXES_AMOUNT",
+        "COUPON_AMOUNT", "TAX_AMOUNT_TELCO", "EFFECTIVE_COUPON_AMOUNT"
+    ]
+    for col in numeric_columns:
+        if col in data.columns:
+            data[col] = data[col].replace(r"[R$\s]", "", regex=True).replace(",", ".", regex=True)
+            data[col] = pd.to_numeric(data[col], errors="coerce")
+
+    # ✅ Force ID fields as strings
+    string_columns = ["ORDER_ID", "TRANSACTION_ID", "REFERENCE_NUMBER"]
+    for col in string_columns:
+        if col in data.columns:
+            data[col] = data[col].astype(str).str.strip()
+
+    # ✅ Add computed fields
+    if {"NET_CREDIT_AMOUNT", "NET_DEBIT_AMOUNT"}.issubset(data.columns):
+        data["NETVALUE"] = data["NET_CREDIT_AMOUNT"] - data["NET_DEBIT_AMOUNT"]
+    if "DESCRIPTION" in data.columns:
+        data["DESC"] = data["DESCRIPTION"].apply(lambda x: str(x).split("_")[0] if "_" in str(x) else x)
+
+    return data
+
 def process_MLK_ExtLib_CSV(file_path):
     """Process MLK_ExtLib CSV files while preserving long numeric columns, filtering rows, and adding new columns."""
     
@@ -616,8 +660,7 @@ def check_and_process_files_csv():
     clean_dir = os.path.join(base_dir, 'clean')
 
     processing_map_csv = {
-        'MGK_Pacotes': process_MGK_Pacotes_CSV,
-        'MLK_ExtLib': process_MLK_ExtLib_CSV
+        'MGK_Pacotes': process_MGK_Pacotes_CSV
     }
 
     for subdir, _, files in os.walk(raw_dir):
@@ -642,6 +685,51 @@ def check_and_process_files_csv():
                         else:
                             pass
                             # print(f"Skipped {file}, already processed.")
+
+def check_and_process_files_multiformat():
+    """
+    Process multi-format files (that can come as .csv or .xlsx)
+    and save standardized clean files.
+    """
+    raw_dir = os.path.join(base_dir, 'raw')
+    clean_dir = os.path.join(base_dir, 'clean')
+
+    # Map of files that may come in multiple formats
+    processing_map_multi = {
+        "MLK_ExtLib": process_MLK_ExtLib
+    }
+
+    for subdir, _, files in os.walk(raw_dir):
+        for file in files:
+            for key, processor in processing_map_multi.items():
+                if key in file and (file.endswith(".csv") or file.endswith(".xlsx")) and not file.startswith("~$"):   
+                    raw_filepath = os.path.join(subdir, file)
+                    clean_subdir = os.path.join(clean_dir, os.path.basename(subdir))
+                    clean_filepath = os.path.join(clean_subdir, 
+                                                  file.replace(".csv", "_clean.xlsx").replace(".xlsx", "_clean.xlsx"))
+
+                    raw_mtime = os.path.getmtime(raw_filepath)
+                    clean_mtime = os.path.getmtime(clean_filepath) if os.path.exists(clean_filepath) else 0
+
+                    if not os.path.exists(clean_filepath) or raw_mtime > clean_mtime:
+                        print(f"📂 Processing MULTIFORMAT: {file}...")
+                        try:
+                            # Load depending on extension
+                            if file.endswith(".csv"):
+                                encoding, delimiter = detect_encoding_and_delimiter(raw_filepath)
+                                # 👇 safeguard: ASCII is too limited, fallback to UTF-8
+                                if encoding is None or encoding.lower() == "ascii":
+                                    encoding = "utf-8"
+                                df = pd.read_csv(raw_filepath, encoding=encoding, delimiter=delimiter)
+                            else:  # .xlsx
+                                df = pd.read_excel(raw_filepath)
+
+                            # Standardize with processor
+                            data = processor(df)
+                            save_cleaned_data(data, clean_filepath)
+
+                        except Exception as e:
+                            print(f"❌ Error processing {file}: {e}")
 
 def extract_hyperlinks_data(filepath, header_name):
     """Extract data and create a new column for hyperlinks for a specific header."""
@@ -683,3 +771,4 @@ def save_cleaned_data(data, output_filepath):
 if __name__ == "__main__":
     check_and_process_files()
     check_and_process_files_csv()
+    check_and_process_files_multiformat()
