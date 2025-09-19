@@ -188,9 +188,20 @@ def load_sales_onfci(resumo_path: Path) -> pd.DataFrame:
 
     CODPF = df[ONFCI_CODE_COL].astype(str).str.strip().str.upper()
     QT    = pd.to_numeric(df[ONFCI_QTY_COL], errors="coerce").fillna(0)
+    VV    = pd.to_numeric(df["MERCVLR"], errors="coerce").fillna(0)   # sales value
+    Mrg   = pd.to_numeric(df["MARGVLR"], errors="coerce").fillna(0)   # contribution margin
 
-    out = pd.DataFrame({"CODPF": CODPF, "VENDAS_2b": QT})
-    return out.groupby("CODPF", as_index=False).agg({"VENDAS_2b":"sum"})
+    out = pd.DataFrame({
+        "CODPF": CODPF,
+        "VENDAS_2b": QT,
+        "VV_2b": VV,
+        "Mrg_2b": Mrg
+    })
+    return out.groupby("CODPF", as_index=False).agg({
+        "VENDAS_2b":"sum",
+        "VV_2b":"sum",
+        "Mrg_2b":"sum"
+    })
 
 def load_sales_llpi(resumo_path: Path) -> pd.DataFrame:
     df = pd.read_excel(resumo_path, sheet_name=SHEET_LLPI)
@@ -201,9 +212,21 @@ def load_sales_llpi(resumo_path: Path) -> pd.DataFrame:
 
     CODPF = df[LLPI_CODE_COL].astype(str).str.strip().str.upper()
     QT    = pd.to_numeric(df[LLPI_QTY_COL], errors="coerce").fillna(0)
+    VV    = pd.to_numeric(df["VLRVENDA"], errors="coerce").fillna(0)
+    Mrg   = pd.to_numeric(df["MargVlr"], errors="coerce").fillna(0)
 
-    out = pd.DataFrame({"CODPF": CODPF, "VENDAS_2c": QT})
-    return out.groupby("CODPF", as_index=False).agg({"VENDAS_2c":"sum"})
+    out = pd.DataFrame({
+        "CODPF": CODPF,
+        "VENDAS_2c": QT,
+        "VV_2c": VV,
+        "Mrg_2c": Mrg
+    })
+    return out.groupby("CODPF", as_index=False).agg({
+        "VENDAS_2c":"sum",
+        "VV_2c":"sum",
+        "Mrg_2c":"sum"
+    })
+
 
 def load_entradas(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
     entradas_path = tables_dir / ENTRADAS_FILE
@@ -301,6 +324,10 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
         "VENDAS_2b", "VENDAS_2c",
         "QT_ENTRADAS", "CU_ENTRADAS", "CT_ENTRADAS",
         "QT_FINAL", "CU_FINAL", "CT_FINAL",
+        # 👇 add your new ones
+        "VV_2b","VV_2c","VV_tot",
+        "Mrg_2b","Mrg_2c","Mrg_tot",
+        "MrgPct_2b","MrgPct_2c","MrgPct_tot"
     ]
     for c in num_cols:
         if c in df.columns:
@@ -324,14 +351,48 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     cols_base = [
         "CODPF",
         "QT_INICIAL", "CU_INICIAL", "CT_INICIAL",
-        "VENDAS_2b", "VENDAS_2c",
+        "VENDAS_2b", "VENDAS_2c", "VENDAS_tot",   # 👈 put Vendas_Tot here
         "QT_ENTRADAS", "CU_ENTRADAS", "CT_ENTRADAS",
         "QT_FINAL", "CU_FINAL", "CT_FINAL",
     ]
-    df = df[cols_base].copy()
+
+    # add new metrics here
+    cols_extra = [
+        "VV_2b","VV_2c","VV_tot",
+        "Mrg_2b","Mrg_2c","Mrg_tot",
+        "MrgPct_2b","MrgPct_2c","MrgPct_tot",
+        "QT_Diff","CU_Diff","CT_Diff_QT","CT_Diff_CU"
+    ]
+
+    # keep only what exists in df (in case of partial data)
+    final_cols = [c for c in cols_base + cols_extra if c in df.columns]
+    df = df[final_cols].copy()
 
     # Calculadas
-    df["Vendas_Tot"]  = df["VENDAS_2b"] + df["VENDAS_2c"]
+    df["VENDAS_tot"]  = df["VENDAS_2b"] + df["VENDAS_2c"]
+
+    # New value and margin metrics
+    df["VV_tot"]     = df.get("VV_2b", 0) + df.get("VV_2c", 0)
+    df["Mrg_tot"]    = df.get("Mrg_2b", 0) + df.get("Mrg_2c", 0)
+
+    # Percentages (protect divide by zero)
+    vv2b = df["VV_2b"] if "VV_2b" in df.columns else pd.Series(0, index=df.index)
+    mrg2b = df["Mrg_2b"] if "Mrg_2b" in df.columns else pd.Series(0, index=df.index)
+
+    vv2c = df["VV_2c"] if "VV_2c" in df.columns else pd.Series(0, index=df.index)
+    mrg2c = df["Mrg_2c"] if "Mrg_2c" in df.columns else pd.Series(0, index=df.index)
+
+    vvtot = df["VV_tot"] if "VV_tot" in df.columns else pd.Series(0, index=df.index)
+    mrgtot = df["Mrg_tot"] if "Mrg_tot" in df.columns else pd.Series(0, index=df.index)
+
+    df["MrgPct_2b"]  = np.where(vv2b != 0, mrg2b / vv2b, 0)
+    df["MrgPct_2c"]  = np.where(vv2c != 0, mrg2c / vv2c, 0)
+    df["MrgPct_tot"] = np.where(vvtot != 0, mrgtot / vvtot, 0)
+
+    # cap at -100%
+    for c in ["MrgPct_2b","MrgPct_2c","MrgPct_tot"]:
+        df[c] = df[c].apply(lambda x: max(x, -1))
+
     df["QT_Diff"]     = df["QT_FINAL"] - (df["QT_INICIAL"] - df["VENDAS_2b"] - df["VENDAS_2c"] + df["QT_ENTRADAS"])
     df["CU_Diff"]     = np.where(df["QT_FINAL"] > 0, df["CU_FINAL"] - df["CU_INICIAL"], 0)
     df["CT_Diff_QT"]  = df["QT_Diff"] * df["CU_INICIAL"]
@@ -386,10 +447,17 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
             # Ativa auto-filtro
             ws.autofilter(0, 0, report.shape[0], report.shape[1] - 1)
 
-            # Formatos
+            # New formats
             money_fmt      = wb.add_format({'num_format': '#,##0.00'})
             light_gray_fmt = wb.add_format({'bg_color': '#F2F2F2'})
             money_gray_fmt = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#F2F2F2'})
+
+            # 👇 new formats
+            blue_money_fmt  = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#DDEBF7'})   # light blue
+            green_money_fmt = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#E2EFDA'})   # light green
+            blue_pct_fmt    = wb.add_format({'num_format': '0%',       'bg_color': '#DDEBF7'})   # blue % format
+            orange_money_fmt= wb.add_format({'num_format': '#,##0.00', 'bg_color': '#FCE4D6'})   # light orange
+
 
             # Colunas que devem ter 2 casas decimais (exceto QT*)
             money_cols = [
@@ -403,12 +471,18 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
 
             for idx, col in enumerate(report.columns):
                 width = max(12, min(32, report[col].astype(str).str.len().max() if not report.empty else 12))
-                if col in money_cols and col in gray_cols:
-                    fmt = money_gray_fmt
-                elif col in money_cols:
-                    fmt = money_fmt
-                elif col in gray_cols:
+                if col in {"QT_Diff", "CU_Diff", "CT_Diff_QT", "CT_Diff_CU"}:
                     fmt = light_gray_fmt
+                elif col in {"CU_INICIAL", "CT_INICIAL", "CU_ENTRADAS", "CT_ENTRADAS", "CU_FINAL", "CT_FINAL"}:
+                    fmt = money_fmt
+                elif col in {"VV_2b","VV_2c","VV_tot"}:
+                    fmt = blue_money_fmt
+                elif col in {"Mrg_2b","Mrg_2c","Mrg_tot"}:
+                    fmt = green_money_fmt
+                elif col in {"MrgPct_2b","MrgPct_2c","MrgPct_tot"}:
+                    fmt = blue_pct_fmt
+                elif col in {"VENDAS_2b","VENDAS_2c","Vendas_Tot"}:
+                    fmt = orange_money_fmt
                 else:
                     fmt = None
                 ws.set_column(idx, idx, width, fmt)
