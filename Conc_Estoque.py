@@ -73,6 +73,7 @@ LLPI_EMPRESA_COL = "EMPRESA"           # usado para filtrar == "K"
 
 # T_Entradas (entradas do mês)
 ENTR_CODE_COL   = "Filho"              # ex.: "CODPF", "Pai"
+ENTRP_CODE_COL   = "Pai"              # ex.: "CODPF", "Pai"
 ENTR_QTY_COL    = "Qt"                 # ex.: "QT", "Qtde"
 ENTR_CU_COL     = "Ult CU R$"                 # ex.: "CU" (se não tiver, use None)
 ENTR_CT_COL     = "Ult CT"                 # ex.: "CT" (se não tiver, use None e calcula QT*CU)
@@ -151,6 +152,15 @@ def ensure_dir(p: Path) -> None:
 # -----------------------
 # Loaders / Normalizers
 # -----------------------
+
+def load_prodf(tables_dir: Path) -> pd.DataFrame:
+    path = tables_dir / "T_Prodf.xlsx"
+    if not path.exists():
+        raise FileNotFoundError(f"Arquivo Prodf.xlsx não encontrado em {tables_dir}")
+    df = pd.read_excel(path)
+    df["CODPF"] = df["CodPF"].astype(str).str.strip().str.upper()
+    df["CODPP"] = df["CodPP"].astype(str).str.strip().str.upper()
+    return df[["CODPF", "CODPP"]]
 
 def load_inventory_pt01(file_path: Path) -> pd.DataFrame:
     df = pd.read_excel(file_path, sheet_name=SHEET_PT01)
@@ -261,6 +271,43 @@ def load_entradas(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
     agg["CU"] = np.where(agg["QT"] != 0, agg["CT"]/agg["QT"], 0.0)
     return agg.rename(columns={"QT":"QT_ENTRADAS","CU":"CU_ENTRADAS","CT":"CT_ENTRADAS"})
 
+def load_cu_pai(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
+    entradas_path = tables_dir / ENTRADAS_FILE
+    if not entradas_path.exists():
+        raise FileNotFoundError(f"Arquivo de entradas não encontrado: {entradas_path}")
+
+    df = pd.read_excel(entradas_path)
+
+    # Ensure date/period column
+    if ENTR_ANOMES_COL:
+        df["ANOMES"] = pd.to_numeric(df[ENTR_ANOMES_COL], errors="coerce")
+        cutoff = int(f"{year%100:02d}{month:02d}")  # yymm
+        df = df[df["ANOMES"] <= cutoff]
+    elif ENTR_DATE_COL:
+        parsed = pd.to_datetime(df[ENTR_DATE_COL], errors="coerce", dayfirst=True, infer_datetime_format=True)
+        cutoff = pd.to_datetime(f"{year}-{month:02d}-01") + pd.offsets.MonthEnd(0)
+        df = df[parsed <= cutoff]
+        df["ANOMES"] = parsed.dt.year % 100 * 100 + parsed.dt.month
+    else:
+        raise ValueError("Nem ENTR_ANOMES_COL nem ENTR_DATE_COL definidos.")
+
+    # Normalize codes
+    df["CODPF"] = df[ENTRP_CODE_COL].astype(str).str.strip().str.upper()
+    CU_src = pd.to_numeric(df[ENTR_CU_COL], errors="coerce").fillna(0)
+
+    # Attach parent codes
+    tables_dir = Path(tables_dir)
+    prodf = load_prodf(tables_dir)
+    df = df.merge(prodf, on="CODPF", how="left")
+
+    # Sort so latest entries come first
+    df = df.sort_values(["CODPP","ANOMES"], ascending=[True, False])
+
+    # Pick last CU for each parent
+    latest = df.drop_duplicates("CODPP", keep="first")[["CODPP", ENTR_CU_COL]].rename(columns={ENTR_CU_COL: "CU_Pai"})
+
+    return latest
+
 # -----------------------
 # Main reconciliation
 # -----------------------
@@ -303,6 +350,13 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     vendas_b = load_sales_onfci(resumo_path)        # CODPF, VENDAS_2b
     vendas_c = load_sales_llpi(resumo_path)         # CODPF, VENDAS_2c
     entrs    = load_entradas(tables_dir, year, month)  # CODPF, QT_ENTRADAS, CU_ENTRADAS, CT_ENTRADAS
+    prodf = load_prodf(tables_dir)
+
+    inv_prev = inv_prev.merge(prodf, on="CODPF", how="left")
+    inv_this = inv_this.merge(prodf, on="CODPF", how="left")
+    vendas_b = vendas_b.merge(prodf, on="CODPF", how="left")
+    vendas_c = vendas_c.merge(prodf, on="CODPF", how="left")
+    entrs    = entrs.merge(prodf, on="CODPF", how="left")
 
     # Renomeia inventários p/ INICIAL/FINAL
     inv_prev = inv_prev.rename(columns={"QT": "QT_INICIAL", "CU": "CU_INICIAL", "CT": "CT_INICIAL"})
@@ -313,7 +367,8 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     df = inv_prev.copy()
     for add in [inv_this, vendas_b, vendas_c, entrs]:
         if add is not None and not add.empty:
-            df = pd.merge(df, add, on="CODPF", how="outer")
+            df = pd.merge(df, add, on=["CODPF","CODPP"], how="outer")
+
     if "CODPF" not in df.columns:
         # Caso extremo (todas as fontes vazias): força coluna
         df["CODPF"] = pd.Series(dtype=str)
@@ -349,7 +404,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
 
     # Ordena colunas na saída final
     cols_base = [
-        "CODPF",
+        "CODPF", "CODPP",
         "QT_INICIAL", "CU_INICIAL", "CT_INICIAL",
         "VENDAS_2b", "VENDAS_2c", "VENDAS_tot",   # 👈 put Vendas_Tot here
         "QT_ENTRADAS", "CU_ENTRADAS", "CT_ENTRADAS",
@@ -392,10 +447,14 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     # cap at -100%
     for c in ["MrgPct_2b","MrgPct_2c","MrgPct_tot"]:
         df[c] = df[c].apply(lambda x: max(x, -1))
+    
+    # Merge CU_Pai (last known parent cost up to month)
+    cu_pai = load_cu_pai(tables_dir, year, month)
+    df = df.merge(cu_pai, on="CODPP", how="left")
 
     df["QT_Diff"]     = df["QT_FINAL"] - (df["QT_INICIAL"] - df["VENDAS_2b"] - df["VENDAS_2c"] + df["QT_ENTRADAS"])
     df["CU_Diff"]     = np.where(df["QT_FINAL"] > 0, df["CU_FINAL"] - df["CU_INICIAL"], 0)
-    df["CT_Diff_QT"]  = df["QT_Diff"] * df["CU_INICIAL"]
+    df["CT_Diff_QT"]  = df["QT_Diff"] * df["CU_Pai"]
     df["CT_Diff_CU"]  = np.where(
         (df["QT_INICIAL"] > 0) & (df["QT_FINAL"] > 0),
         df["QT_INICIAL"] * (df["CU_FINAL"] - df["CU_INICIAL"]),
@@ -431,7 +490,44 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
     out_dir = this_dir
     ensure_dir(out_dir)
 
+    # Run reconciliation (child level)
     report = reconcile_inventory(year, month)
+
+    # Load parent mapping
+    tables_dir = resolve_tables_dir(year, month)
+    prodf = load_prodf(tables_dir)
+
+    # Build parent-level aggregation
+
+    agg_map = {}
+    for col in report.columns:
+        if col in ["CODPF", "CODPP"]:
+            continue
+        elif col == "CU_Pai":
+            agg_map[col] = "first"   # keep as is (same for all children under same parent)
+        elif pd.api.types.is_numeric_dtype(report[col]):
+            agg_map[col] = "sum"
+        else:
+            agg_map[col] = "first"
+
+    parent_report = (
+        report.groupby("CODPP", as_index=False)
+        .agg(agg_map)
+    )
+
+    # Recompute CU from CT/QT at parent level
+    if "QT_INICIAL" in parent_report.columns and "CT_INICIAL" in parent_report.columns:
+        parent_report["CU_INICIAL"] = np.where(
+            parent_report["QT_INICIAL"] != 0,
+            parent_report["CT_INICIAL"] / parent_report["QT_INICIAL"],
+            0.0,
+        )
+    if "QT_FINAL" in parent_report.columns and "CT_FINAL" in parent_report.columns:
+        parent_report["CU_FINAL"] = np.where(
+            parent_report["QT_FINAL"] != 0,
+            parent_report["CT_FINAL"] / parent_report["QT_FINAL"],
+            0.0,
+        )
 
     # Save CSV and XLSX
     tag = yymm_to_str(year, month)
@@ -439,53 +535,52 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
 
     if save_excel:
         with pd.ExcelWriter(xlsx_path, engine="xlsxwriter") as writer:
-            report.to_excel(writer, index=False, sheet_name="Estoq")
-
+            # --- Child sheet ---
+            report.to_excel(writer, index=False, sheet_name="Child")
             wb = writer.book
-            ws = writer.sheets["Estoq"]
+            ws_child = writer.sheets["Child"]
 
-            # Ativa auto-filtro
-            ws.autofilter(0, 0, report.shape[0], report.shape[1] - 1)
+            # --- Parent sheet ---
+            parent_report.to_excel(writer, index=False, sheet_name="Parent")
+            ws_parent = writer.sheets["Parent"]
 
-            # New formats
-            money_fmt      = wb.add_format({'num_format': '#,##0.00'})
-            light_gray_fmt = wb.add_format({'bg_color': '#F2F2F2'})
-            money_gray_fmt = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#F2F2F2'})
-
-            # 👇 new formats
+            # Define formats
+            money_fmt       = wb.add_format({'num_format': '#,##0.00'})
+            light_gray_fmt  = wb.add_format({'bg_color': '#F2F2F2'})
+            money_gray_fmt  = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#F2F2F2'})
             blue_money_fmt  = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#DDEBF7'})   # light blue
             green_money_fmt = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#E2EFDA'})   # light green
             blue_pct_fmt    = wb.add_format({'num_format': '0%',       'bg_color': '#DDEBF7'})   # blue % format
             orange_money_fmt= wb.add_format({'num_format': '#,##0.00', 'bg_color': '#FCE4D6'})   # light orange
 
-
-            # Colunas que devem ter 2 casas decimais (exceto QT*)
             money_cols = [
                 "CU_INICIAL", "CT_INICIAL",
                 "CU_ENTRADAS", "CT_ENTRADAS",
                 "CU_FINAL", "CT_FINAL",
                 "CU_Diff", "CT_Diff_QT", "CT_Diff_CU"
             ]
-            # Colunas calculadas a pintar de cinza
             gray_cols = {"QT_Diff", "CU_Diff", "CT_Diff_QT", "CT_Diff_CU"}
 
-            for idx, col in enumerate(report.columns):
-                width = max(12, min(32, report[col].astype(str).str.len().max() if not report.empty else 12))
-                if col in {"QT_Diff", "CU_Diff", "CT_Diff_QT", "CT_Diff_CU"}:
-                    fmt = light_gray_fmt
-                elif col in {"CU_INICIAL", "CT_INICIAL", "CU_ENTRADAS", "CT_ENTRADAS", "CU_FINAL", "CT_FINAL"}:
-                    fmt = money_fmt
-                elif col in {"VV_2b","VV_2c","VV_tot"}:
-                    fmt = blue_money_fmt
-                elif col in {"Mrg_2b","Mrg_2c","Mrg_tot"}:
-                    fmt = green_money_fmt
-                elif col in {"MrgPct_2b","MrgPct_2c","MrgPct_tot"}:
-                    fmt = blue_pct_fmt
-                elif col in {"VENDAS_2b","VENDAS_2c","Vendas_Tot"}:
-                    fmt = orange_money_fmt
-                else:
-                    fmt = None
-                ws.set_column(idx, idx, width, fmt)
+            # Apply formatting to both sheets
+            for ws, df in [(ws_child, report), (ws_parent, parent_report)]:
+                ws.autofilter(0, 0, df.shape[0], df.shape[1] - 1)
+                for idx, col in enumerate(df.columns):
+                    width = max(12, min(32, df[col].astype(str).str.len().max() if not df.empty else 12))
+                    if col in gray_cols:
+                        fmt = light_gray_fmt
+                    elif col in money_cols:
+                        fmt = money_fmt
+                    elif col in {"VV_2b","VV_2c","VV_tot"}:
+                        fmt = blue_money_fmt
+                    elif col in {"Mrg_2b","Mrg_2c","Mrg_tot"}:
+                        fmt = green_money_fmt
+                    elif col in {"MrgPct_2b","MrgPct_2c","MrgPct_tot"}:
+                        fmt = blue_pct_fmt
+                    elif col in {"VENDAS_2b","VENDAS_2c","Vendas_Tot"}:
+                        fmt = orange_money_fmt
+                    else:
+                        fmt = None
+                    ws.set_column(idx, idx, width, fmt)
 
     print(f"Saved: {xlsx_path}")
     return xlsx_path
