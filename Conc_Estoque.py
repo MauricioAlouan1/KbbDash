@@ -274,37 +274,29 @@ def load_entradas(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
 def load_cu_pai(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
     entradas_path = tables_dir / ENTRADAS_FILE
     if not entradas_path.exists():
-        raise FileNotFoundError(f"Arquivo de entradas não encontrado: {entradas_path}")
+        raise FileNotFoundError(f"T_Entradas.xlsx não encontrado em {entradas_path}")
 
     df = pd.read_excel(entradas_path)
 
-    # Ensure date/period column
-    if ENTR_ANOMES_COL:
-        df["ANOMES"] = pd.to_numeric(df[ENTR_ANOMES_COL], errors="coerce")
-        cutoff = int(f"{year%100:02d}{month:02d}")  # yymm
-        df = df[df["ANOMES"] <= cutoff]
-    elif ENTR_DATE_COL:
-        parsed = pd.to_datetime(df[ENTR_DATE_COL], errors="coerce", dayfirst=True, infer_datetime_format=True)
-        cutoff = pd.to_datetime(f"{year}-{month:02d}-01") + pd.offsets.MonthEnd(0)
-        df = df[parsed <= cutoff]
-        df["ANOMES"] = parsed.dt.year % 100 * 100 + parsed.dt.month
-    else:
-        raise ValueError("Nem ENTR_ANOMES_COL nem ENTR_DATE_COL definidos.")
+    # Keep only rows with a valid parent
+    df = df[df["Pai"].notna() & (df["Pai"].astype(str).str.strip() != "")]
+    df["CODPP"] = df["Pai"].astype(str).str.strip().str.upper()
 
-    # Normalize codes
-    df["CODPF"] = df[ENTRP_CODE_COL].astype(str).str.strip().str.upper()
-    CU_src = pd.to_numeric(df[ENTR_CU_COL], errors="coerce").fillna(0)
+    # Parse real date
+    df["Ultima Entrada"] = pd.to_datetime(df["Ultima Entrada"], errors="coerce", dayfirst=True)
 
-    # Attach parent codes
-    tables_dir = Path(tables_dir)
-    prodf = load_prodf(tables_dir)
-    df = df.merge(prodf, on="CODPF", how="left")
+    # Cap by current month end
+    cutoff = pd.to_datetime(f"{year}-{month:02d}-01") + pd.offsets.MonthEnd(0)
+    df = df[df["Ultima Entrada"] <= cutoff]
 
-    # Sort so latest entries come first
-    df = df.sort_values(["CODPP","ANOMES"], ascending=[True, False])
+    # Sort so latest entries come first per parent
+    df = df.sort_values(["CODPP", "Ultima Entrada"], ascending=[True, False])
 
-    # Pick last CU for each parent
-    latest = df.drop_duplicates("CODPP", keep="first")[["CODPP", ENTR_CU_COL]].rename(columns={ENTR_CU_COL: "CU_Pai"})
+    # Keep only latest CU per parent
+    latest = (
+        df.drop_duplicates("CODPP", keep="first")[["CODPP", "Ult CU R$"]]
+        .rename(columns={"Ult CU R$": "CU_Pai"})
+    )
 
     return latest
 
@@ -557,7 +549,7 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
                 "CU_INICIAL", "CT_INICIAL",
                 "CU_ENTRADAS", "CT_ENTRADAS",
                 "CU_FINAL", "CT_FINAL",
-                "CU_Diff", "CT_Diff_QT", "CT_Diff_CU"
+                "CU_Diff", "CT_Diff_QT", "CT_Diff_CU", "CU_Pai"
             ]
             gray_cols = {"QT_Diff", "CU_Diff", "CT_Diff_QT", "CT_Diff_CU"}
 
