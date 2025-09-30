@@ -1,94 +1,84 @@
 # Dash_salesmargin.py
+from Dash_shared import app, load_data
 from dash import html, dcc, Input, Output
-import plotly.express as px
 import pandas as pd
-from Dash_shared import load_data, app
+import plotly.graph_objs as go
 
+# One-time load (you can refresh in the callback if your data changes frequently)
+df_raw = load_data()  # expected columns: DATE, EMPRESA, MP, VV_tot, Mrg_tot (adjust if your names differ)
 
-
-# Define the layout for the sales and margin view
-salesmargin_layout = html.Div([
-    html.H2("Sales and Margin per Product"),
-    html.Div(
-        style={'display': 'flex', 'justify-content': 'space-between', 'padding': '10px 0'},
-        children=[
-            dcc.DatePickerRange(
-                id='date-picker',
-                start_date_placeholder_text='Start Date',
-                end_date_placeholder_text='End Date',
-            ),
-            dcc.Dropdown(
-                id='company-filter',
-                options=[
-                    {'label': 'Company A', 'value': 'A'},
-                    {'label': 'Company B', 'value': 'B'},
-                    {'label': 'Company K', 'value': 'K'},
-                ],
-                placeholder='Select Company'
-            ),
-            dcc.Dropdown(
-                id='marketplace-filter',
-                options=[
-                    {'label': 'Marketplace ML', 'value': 'ML'},
-                    {'label': 'Marketplace MA', 'value': 'MA'},
-                    {'label': 'Marketplace MB', 'value': 'MB'},
-                ],
-                placeholder='Select Marketplace'
-            )
-        ]
-    ),
-    dcc.Graph(id='sales-margin-graph'),
-    dcc.Slider(
-        id='page-slider',
-        min=1,
-        max=1,
-        step=1,
-        value=1,
-        marks={1: '1'}
-    ),
-])
-
-# Define the callback for the sales and margin graph
-@app.callback(
-    Output('sales-margin-graph', 'figure'),
-    [Input('date-picker', 'start_date'),
-     Input('date-picker', 'end_date'),
-     Input('company-filter', 'value'),
-     Input('marketplace-filter', 'value'),
-     Input('page-slider', 'value')]
+salesmargin_layout = html.Div(
+    [
+        html.H3("Vendas & Margem (Consolidado)"),
+        dcc.Graph(id="sales-margin-graph"),
+        html.Div(
+            "Usa os filtros globais (topo): período, empresa e marketplace.",
+            style={"fontSize": 12, "color": "#666", "marginTop": "8px"},
+        ),
+    ],
+    style={"padding": "12px"},
 )
-def update_sales_margin_graph(start_date, end_date, company, marketplace, page):
-    df = load_data()['MLK_Vendas']  # Adjust the key as needed
 
-    # Filter by date range
-    if start_date and end_date:
-        mask = (df['DATA DA VENDA'] >= start_date) & (df['DATA DA VENDA'] <= end_date)
-        df = df.loc[mask]
 
-    # Filter by company
-    if company:
-        df = df[df['EMPRESA'] == company]
+@app.callback(
+    Output("sales-margin-graph", "figure"),
+    [
+        Input("date-picker", "start_date"),
+        Input("date-picker", "end_date"),
+        Input("company-filter", "value"),
+        Input("marketplace-filter", "value"),
+    ],
+)
+def update_sales_margin(start_date, end_date, empresas, marketplaces):
+    if df_raw is None or df_raw.empty:
+        return go.Figure(layout={"annotations": [dict(text="Sem dados", showarrow=False)]})
 
-    # Filter by marketplace
-    if marketplace:
-        df = df[df['MP'] == marketplace]
+    df = df_raw.copy()
 
-    # Group and paginate
-    grouped_df = df.groupby('CODPP').agg({
-        'VLRTOTALPSKU': 'sum',
-        'MARGVLR': 'sum'
-    }).reset_index()
-    grouped_df = grouped_df.sort_values(by='VLRTOTALPSKU', ascending=False)
-    grouped_df['MARGPCT'] = (grouped_df['MARGVLR'] / grouped_df['VLRTOTALPSKU']) * 100
+    # Date filter
+    if "DATE" in df.columns:
+        df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
+        if start_date:
+            df = df[df["DATE"] >= pd.to_datetime(start_date)]
+        if end_date:
+            df = df[df["DATE"] <= pd.to_datetime(end_date)]
 
-    page_size = 10
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
-    paginated_df = grouped_df.iloc[start_idx:end_idx]
+    # Company filter
+    if empresas:
+        df = df[df["EMPRESA"].isin(empresas)]
 
-    fig = px.bar(paginated_df, x='VLRTOTALPSKU', y='CODPP', orientation='h',
-                 hover_data={'MARGVLR': True, 'MARGPCT': ':.2f'},
-                 labels={'VLRTOTALPSKU': 'Sales (R$)', 'MARGVLR': 'Margin (R$)', 'MARGPCT': 'Margin (%)'})
+    # Marketplace filter (IMPORTANT: your column is MP, not MARKETPLACE)
+    if marketplaces:
+        col_mp = "MP" if "MP" in df.columns else "MARKETPLACE"
+        df = df[df[col_mp].isin(marketplaces)]
 
-    fig.update_layout(yaxis={'categoryorder': 'total ascending'}, barmode='group')
+    # Aggregate by day
+    # Adjust column names below if your metrics are different
+    val_cols = []
+    if "VV_tot" in df.columns:
+        val_cols.append("VV_tot")
+    if "Mrg_tot" in df.columns:
+        val_cols.append("Mrg_tot")
+
+    if not val_cols:
+        # fallback to any likely columns (customize as needed)
+        for c in ["VV_2b", "VV_2c", "Mrg_2b", "Mrg_2c"]:
+            if c in df.columns:
+                val_cols.append(c)
+
+    if not val_cols:
+        return go.Figure(layout={"annotations": [dict(text="Sem colunas de valor/margem", showarrow=False)]})
+
+    g = df.groupby("DATE", as_index=False)[val_cols].sum()
+
+    fig = go.Figure()
+    for c in val_cols:
+        fig.add_trace(go.Scatter(x=g["DATE"], y=g[c], mode="lines+markers", name=c))
+
+    fig.update_layout(
+        margin=dict(l=30, r=10, t=30, b=30),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis_title="Data",
+        yaxis_title="Valor (R$)",
+    )
     return fig

@@ -1,43 +1,74 @@
 # Dash1.py (previously Dash.py)
 from dash import dcc, html, Input, Output, dash_table
 import pandas as pd
+from pandas.tseries.offsets import MonthEnd
 from Dash_overview import overview_layout
 from Dash_sheetview import sheetview_layout
 from Dash_salesmargin import salesmargin_layout
 from Dash_shared import app, load_data
 
-# Additional setup and layout code here
+df_init = load_data()
+def _default_filters_from_df(df: pd.DataFrame):
+    # Safe fallbacks
+    default = {
+        "start": pd.Timestamp.today().normalize() - MonthEnd(1) + pd.offsets.MonthBegin(0),
+        "end":   (pd.Timestamp.today().normalize() - MonthEnd(1)) + MonthEnd(0),
+        "emp_options": [],
+        "mp_options": [],
+    }
+    if df is None or df.empty or "DATE" not in df.columns:
+        return default
+
+    # Ensure datetime
+    d = pd.to_datetime(df["DATE"], errors="coerce").dropna()
+    if d.empty:
+        return default
+
+    # Pick **last full month** present in the data (by max DATE)
+    last_date = d.max()               # e.g., 2025-08-31
+    last_month_start = last_date.replace(day=1)
+    last_month_end   = (last_month_start + MonthEnd(0))
+
+    # Build options
+    emp = sorted(df.get("EMPRESA", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
+    mp  = sorted(df.get("MP", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
+
+    return {
+        "start": last_month_start,
+        "end":   last_month_end,
+        "emp_options": [{"label": e, "value": e} for e in emp],
+        "mp_options":  [{"label": m, "value": m} for m in mp],
+    }
+
+_defaults = _default_filters_from_df(df_init)
 
 
 
 # Define the filter components
-date_picker = dcc.DatePickerRange(
-    id='date-picker',
-    start_date_placeholder_text="Start Period",
-    end_date_placeholder_text="End Period",
-    display_format='YYYY-MM-DD'
-)
+# Replace your DatePickerRange & dropdowns with:
 
-company_filter = dcc.Dropdown(
-    id='company-filter',
-    options=[
-        {'label': 'Company K', 'value': 'K'},
-        {'label': 'Company A', 'value': 'A'},
-        {'label': 'Company B', 'value': 'B'}
-    ],
-    multi=True,
-    placeholder="Select Company"
-)
+dcc.DatePickerRange(
+    id="date-picker",
+    start_date=_defaults["start"].date(),
+    end_date=_defaults["end"].date(),
+    display_format="YYYY-MM-DD",
+),
 
-marketplace_filter = dcc.Dropdown(
-    id='marketplace-filter',
-    options=[
-        {'label': 'Marketplace 1', 'value': 'M1'},
-        {'label': 'Marketplace 2', 'value': 'M2'}
-    ],
+dcc.Dropdown(
+    id="company-filter",
+    options=_defaults["emp_options"],
+    value=None,              # None = no filter
     multi=True,
-    placeholder="Select Marketplace"
-)
+    placeholder="Select Company",
+),
+
+dcc.Dropdown(
+    id="marketplace-filter",
+    options=_defaults["mp_options"],
+    value=None,              # None = no filter
+    multi=True,
+    placeholder="Select Marketplace",
+),
 
 # Define the main layout with tabs
 app.layout = html.Div([
@@ -163,7 +194,7 @@ def update_graph(start_date, end_date, selected_companies, selected_marketplaces
     if selected_companies:
         df = df[df['EMPRESA'].isin(selected_companies)]
     if selected_marketplaces:
-        df = df[df['MARKETPLACE'].isin(selected_marketplaces)]
+        df = df[df['MP'].isin(selected_marketplaces)]
     # Update your graph creation logic here
     return create_main_graph(df)
 
