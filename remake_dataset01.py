@@ -25,15 +25,40 @@ from dateutil.relativedelta import relativedelta
 from openpyxl import load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import NamedStyle, Font, PatternFill, Alignment, Border, Side
+import argparse
 import re
 
-#Global
-ano_x = 2025
-mes_x = 9
+def _select_year_month():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("-y", "--year", type=int)
+    parser.add_argument("-m", "--month", type=int)
+    args, _ = parser.parse_known_args()
 
-# Format month as two digits (01, 02, ..., 12)
-mes_str = f"{mes_x:02d}"
-ano_mes = f"{ano_x}_{mes_str}"  # e.g., "2025_01"
+    if args.year and args.month:
+        return args.year, args.month
+
+    # Default = previous month
+    now = datetime.now()
+    prev = now.replace(day=1) - relativedelta(days=1)
+    def_year, def_month = prev.year, prev.month
+
+    print("Year and/or month not provided.")
+    try:
+        year  = int(input(f"Enter year (default {def_year}): ") or def_year)
+        month = int(input(f"Enter month [1-12] (default {def_month}): ") or def_month)
+    except (EOFError, KeyboardInterrupt):
+        # non-interactive fallback = previous month
+        year, month = def_year, def_month
+
+    return year, month
+
+# set the SAME globals your script already expects
+ano_x, mes_x = _select_year_month()
+ano_mes = f"{ano_x}_{mes_x:02d}"
+print(f"Selected period: {ano_mes}")
+# === end month selection ===
+
+def yymm(year, month): return f"{year}_{month:02d}"
 
 # Define the potential base directories
 path_options = [
@@ -53,21 +78,6 @@ print("Base directory set to:", base_dir)
 
 static_dir = os.path.join(base_dir, 'Tables')
 #inventory_file_path = os.path.join(static_dir, 'R_EstoqComp.xlsx')  # Update to the correct path if needed
-template_file = os.path.join(base_dir, "Template", "PivotTemplate.xlsm")
-output_file = os.path.join(base_dir, "clean", ano_mes, f"R_Resumo_{ano_mes}.xlsm")
-
-# Step 1: Copy the template (preserves macros)
-shutil.copy(template_file, output_file)
-print(f"✅ Copied template to {output_file}")
-
-# Step 2: Open the template workbook with macros
-print("✅ Opening template with macros...")
-wb_template = load_workbook(output_file, keep_vba=True)
-
-# Step 3: Remove all existing sheets from the template
-print(f"✅ Removing {len(wb_template.sheetnames)} sheets from template...")
-for sheet in wb_template.sheetnames:
-    del wb_template[sheet]
 
 column_rename_dict = {
     'O_NFCI': {
@@ -242,11 +252,9 @@ def rename_columns(all_data, column_rename_dict):
             all_data[df_name] = df
     return all_data
 
-def load_recent_data(base_dir, file_pattern, ds_year = ano_x, ds_month = mes_x):
- 
+def load_recent_data(base_dir, file_pattern, ds_year, ds_month):
     frames = []
-    current_date = datetime(ds_year, ds_month, 1)
-    year_month = current_date.strftime('%Y_%m')
+    year_month = f"{ds_year}_{ds_month:02d}"
     file_path = os.path.join(base_dir, 'clean', year_month, file_pattern.format(year_month=year_month))
 
     # Specify which columns should always be treated as strings
@@ -328,117 +336,102 @@ def merge_all_data(all_data):
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_GruposCli", "NomeF", "G1", default_value="V")
 
     # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
-    all_data = merge_data_lastcost(all_data, df1_name="O_NFCI",        # Main sales table
-        df1_product_col="CODPP",  # Product code in main table
-        df1_date_col="EMISS",     # Sale date column
-        df2_name="T_Entradas",    # Cost data table
-        df2_product_col="PAI",    # Product code in cost table
-        df2_date_col="ULTIMA ENTRADA",  # Purchase date column
-        df2_cost_col="ULT CU R$",       # Cost column
-        new_col_name="ECU",     # New column name for retrieved cost
-    default_value=999           # Default cost if no match is found
-)
-        # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
-    all_data = merge_data_lastcost(all_data, df1_name="L_LPI",        # Main sales table
-        df1_product_col="CODPP",  # Product code in main table
-        df1_date_col="DATA",     # Sale date column
-        df2_name="T_Entradas",    # Cost data table
-        df2_product_col="PAI",    # Product code in cost table
-        df2_date_col="ULTIMA ENTRADA",  # Purchase date column
-        df2_cost_col="ULT CU R$",       # Cost column
-        new_col_name="ECUK",     # New column name for retrieved cost
-    default_value=999           # Default cost if no match is found
-)
-        # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
-    all_data = merge_data_lastcost(all_data, df1_name="MLK_Vendas",        # Main sales table
-        df1_product_col="CODPP",  # Product code in main table
-        df1_date_col="DATA DA VENDA",     # Sale date column
-        df2_name="T_Entradas",    # Cost data table
-        df2_product_col="PAI",    # Product code in cost table
-        df2_date_col="ULTIMA ENTRADA",  # Purchase date column
-        df2_cost_col="ULT CU R$",       # Cost column
-        new_col_name="ECU",     # New column name for retrieved cost
-    default_value=999           # Default cost if no match is found
-)
+    all_data = merge_data_lastcost(all_data, df1_name="O_NFCI",
+        df1_product_col="CODPP",
+        df1_date_col="EMISS",
+        df2_name="T_Entradas",
+        df2_product_col="PAI",
+        df2_date_col="ULTIMA ENTRADA",
+        df2_cost_col="ULT CU R$",
+        new_col_name="ECU",
+        default_value=999
+    )
+    # L_LPI
+    all_data = merge_data_lastcost(all_data, df1_name="L_LPI",
+        df1_product_col="CODPP",
+        df1_date_col="DATA",
+        df2_name="T_Entradas",
+        df2_product_col="PAI",
+        df2_date_col="ULTIMA ENTRADA",
+        df2_cost_col="ULT CU R$",
+        new_col_name="ECUK",
+        default_value=999
+    )
+    # MLK_Vendas
+    all_data = merge_data_lastcost(all_data, df1_name="MLK_Vendas",
+        df1_product_col="CODPP",
+        df1_date_col="DATA DA VENDA",
+        df2_name="T_Entradas",
+        df2_product_col="PAI",
+        df2_date_col="ULTIMA ENTRADA",
+        df2_cost_col="ULT CU R$",
+        new_col_name="ECU",
+        default_value=999
+    )
 
     all_data = merge_data2v(all_data, "MLA_Vendas", "ANOMES", "SKU", "ECU", "ANOMES", "CODPF", "VALUE", "ECU", default_value=999)
- 
+
     # Merge VENDEDOR with T_REPS for COMPCT
     all_data = merge_data(all_data, "O_NFCI", "Vendedor", "T_Reps", "Vendedor", "COMISSPCT", default_value=0)
 
     # Merge UF with T_Fretes for FretePCT
     all_data = merge_data(all_data, "O_NFCI", "UF", "T_Fretes", "UF", "FRETEPCT", default_value=0)
-    # Set FRETEPCT = 0 where G1 = "DROP" or "ALWE" in O_NFCI table
+    # Set FRETEPCT = 0 where G1 = "DROP" or "ALWE"
     if 'O_NFCI' in all_data:
         all_data['O_NFCI'].loc[all_data['O_NFCI']['G1'].isin(['DROP', 'ALWE']), 'FRETEPCT'] = 0
 
     # Merge NomeF with T_Verbas for VerbaPct
     all_data = merge_data(all_data, "O_NFCI", "NOMEF", "T_Verbas", "NomeF", "VERBAPCT", default_value=0)
 
-    # Perform the merge (example merge, adjust as necessary)
-    all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "Empresa", default_value='erro')
-    all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "MP", default_value='erro')
+    # MP merges
+    all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "Empresa",  default_value='erro')
+    all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "MP",       default_value='erro')
     all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "EmpresaF", default_value='erro')
 
-    # OrderStatus Merge
+    # OrderStatus
     all_data = merge_data(all_data, "MLA_Vendas", "STATUS", "T_MLStatus", "MLStatus", "OrderStatus", default_value='erro')
     all_data = merge_data(all_data, "MLK_Vendas", "STATUS", "T_MLStatus", "MLStatus", "OrderStatus", default_value='erro')
 
     # Ctas a Pagar e Receber
     all_data = merge_data(all_data, "O_CtasAPagar", "CATEGORIA", "T_CtasAPagarClass", "Categoria", "GrupoCtasAPagar", default_value='erro')
-    #all_data = merge_data(all_data, "O_CtasARec", "CATEGORIA", "T_CtasARecClass", "Categoria", "GrupoCtasAPagar", default_value='erro')
+    # all_data = merge_data(all_data, "O_CtasARec", "CATEGORIA", "T_CtasARecClass", "Categoria", "GrupoCtasAPagar", default_value='erro')
 
     # CC
-    all_data = merge_data(all_data, "O_CC", "CATEGORIA", "T_CCCats", "CC_Categoria Omie", "CC_Cat SG", default_value='erro')
+    all_data = merge_data(all_data, "O_CC", "CATEGORIA", "T_CCCats", "CC_Categoria Omie", "CC_Cat SG",  default_value='erro')
     all_data = merge_data(all_data, "O_CC", "CATEGORIA", "T_CCCats", "CC_Categoria Omie", "CC_Cat Grp", default_value='erro')
-    all_data = merge_data(all_data, "O_CC", "CATEGORIA", "T_CCCats", "CC_Categoria Omie", "CC_B2X", default_value='erro')
-    all_data = merge_data(all_data, "O_CC", "CATEGORIA", "T_CCCats", "CC_Categoria Omie", "CC_Tipo", default_value='erro')
-    
+    all_data = merge_data(all_data, "O_CC", "CATEGORIA", "T_CCCats", "CC_Categoria Omie", "CC_B2X",     default_value='erro')
+    all_data = merge_data(all_data, "O_CC", "CATEGORIA", "T_CCCats", "CC_Categoria Omie", "CC_Tipo",    default_value='erro')
+
     for key, df in all_data.items():
         if key == 'O_NFCI':
-            # print_table_and_columns(all_data, "O_NFCI")
-
-            # Create column "C" (C)onta pra calculo (remessa não conta)
             df['C'] = 1 - df['REM_NF']
-            
-            # Create column "B" (B)onificado
             df['B'] = df.apply(lambda row: 1 if row['OP'] == 'REMESSA DE PRODUTO' and row['C'] == 1 else 0, axis=1)
-            
-            # Create column ECT (ECU x QTD)
             df['ECT'] = df['ECU'] * df['QTD'] * df['C']
- 
-            # Create column COMVLR (VLRMERC x COMPCT)
             df['COMISSVLR'] = df['MERCVLR'] * df['COMISSPCT'] * df['C']
-
-            # Create column FreteVLR (FretePCT x TotalNF)            
-            #df['FRETEVLR'] = df['FRETEPCT'] * df['TOTALNF'] * df['C']
-            df['FRETEVLR'] = df.apply(lambda row: max(row['FRETEPCT'] * row['TOTALNF'] * row['C'], row['FRETEPCT'] * row['ECT'] * row['C'] * 2), axis=1)
-
-            # Create column VerbaVLR (VerbaPCT x TotalNF)
+            df['FRETEVLR'] = df.apply(lambda row: max(row['FRETEPCT'] * row['TOTALNF'] * row['C'],
+                                                      row['FRETEPCT'] * row['ECT'] * row['C'] * 2), axis=1)
             df['VERBAVLR'] = df['VERBAPCT'] * df['TOTALNF'] * df['C']
-
-            # Create column MargCVlr
             df['MARGVLR'] = df['C'] * ( df['MERCVLR'] * (1 - 0.0925) - df['ICMS'] ) - df['VERBAVLR'] - df['FRETEVLR'] - df['COMISSVLR'] - df['ECT']
-
-            # Create column VerbaVLR (VerbaPCT x TotalNF)
             df['MARGPCT'] = df['MARGVLR'] / df['MERCVLR']
 
         elif key == 'L_LPI':
+            # make sure join key is string
+            if 'CÓDIGO PEDIDO' in df.columns:
+                df['CÓDIGO PEDIDO'] = df['CÓDIGO PEDIDO'].astype(str).str.strip()
+
             cols_to_drop = ['PREÇO', 'PREÇO TOTAL', 'DESCONTO ITEM', 'DESCONTO TOTAL']
             df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
-            # Add the 'Valido' column directly
+
             df["MP2"] = df["MP"].str[:2]
             df['VALIDO'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
             df['KAB'] = df.apply(lambda row: 1 if row['VALIDO'] == 1 and row['EMPRESA'] in ['K', 'A', 'B'] else 0, axis=1)
-            #print("#### DEBUG  ####")
-            #print("Unique values in EMPRESA:", df['EMPRESA'].unique())
-            #print("Unique values in VALIDO:", df['VALIDO'].unique())
-            #print("Unique values in KAB:", df['KAB'].unique())
-
             df['ECTK'] = df['ECUK'] * df['QTD'] * df['KAB']
 
-            # Add the 'TipoAnuncio' column directly from 'MLK_Vendas'
-            if 'MLK_Vendas' in all_data:
+            # ----- TipoAnuncio from MLK_Vendas -----
+            if ('MLK_Vendas' in all_data and
+                not all_data['MLK_Vendas'].empty and
+                {'N.º DE VENDA', 'TIPO DE ANÚNCIO'}.issubset(set(all_data['MLK_Vendas'].columns))):
+                all_data['MLK_Vendas']['N.º DE VENDA'] = all_data['MLK_Vendas']['N.º DE VENDA'].astype(str).str.strip()
                 print_table_head(all_data, "MLK_Vendas")
                 df = df.merge(
                     all_data['MLK_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
@@ -446,45 +439,65 @@ def merge_all_data(all_data):
                     right_on='N.º DE VENDA',
                     how='left'
                 )
-                df['TipoAnuncioK'] = df.apply(lambda row: 'ML' + row['TIPO DE ANÚNCIO'][:2] if pd.notna(row['TIPO DE ANÚNCIO']) and row['EMPRESA'] == 'K' and row['MP'] == 'ML' else None, axis=1)                    
+                df['TipoAnuncioK'] = df.apply(
+                    lambda row: 'ML' + row['TIPO DE ANÚNCIO'][:2] if pd.notna(row['TIPO DE ANÚNCIO']) and row['EMPRESA'] == 'K' and row['MP'] == 'ML' else None,
+                    axis=1
+                )
                 df.drop(columns=['N.º DE VENDA', 'TIPO DE ANÚNCIO'], inplace=True)
+            else:
+                # ensure column exists so later drop doesn't crash
+                df['TipoAnuncioK'] = None
 
-            # Add the 'TipoAnuncio' column for 'ALWE' and lookup in 'MLA_Vendas'
-            if 'MLA_Vendas' in all_data:
+            # ----- TipoAnuncio from MLA_Vendas -----
+            if ('MLA_Vendas' in all_data and
+                not all_data['MLA_Vendas'].empty and
+                {'N.º DE VENDA', 'TIPO DE ANÚNCIO'}.issubset(set(all_data['MLA_Vendas'].columns))):
+                all_data['MLA_Vendas']['N.º DE VENDA'] = all_data['MLA_Vendas']['N.º DE VENDA'].astype(str).str.strip()
                 df = df.merge(
                     all_data['MLA_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
                     left_on='CÓDIGO PEDIDO',
                     right_on='N.º DE VENDA',
                     how='left'
                 )
-                df['TipoAnuncioA'] = df.apply(lambda row: 'ML' + row['TIPO DE ANÚNCIO'][:2] if pd.notna(row['TIPO DE ANÚNCIO']) and row['EMPRESA'] == 'A' and row['MP'] == 'ML' else None, axis=1)                    
+                df['TipoAnuncioA'] = df.apply(
+                    lambda row: 'ML' + row['TIPO DE ANÚNCIO'][:2] if pd.notna(row['TIPO DE ANÚNCIO']) and row['EMPRESA'] == 'A' and row['MP'] == 'ML' else None,
+                    axis=1
+                )
                 df.drop(columns=['N.º DE VENDA', 'TIPO DE ANÚNCIO'], inplace=True)
+            else:
+                df['TipoAnuncioA'] = None  # ensure column exists
 
-            # Add the 'TipoAnuncio' column for 'Baby Trends' and lookup in 'MLB_Vendas'
-            if 'MLB_Vendas' in all_data:
+            # ----- TipoAnuncio from MLB_Vendas -----
+            if ('MLB_Vendas' in all_data and
+                not all_data['MLB_Vendas'].empty and
+                {'N.º DE VENDA', 'TIPO DE ANÚNCIO'}.issubset(set(all_data['MLB_Vendas'].columns))):
+                all_data['MLB_Vendas']['N.º DE VENDA'] = all_data['MLB_Vendas']['N.º DE VENDA'].astype(str).str.strip()
                 df = df.merge(
                     all_data['MLB_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
                     left_on='CÓDIGO PEDIDO',
                     right_on='N.º DE VENDA',
                     how='left'
                 )
-                df['TipoAnuncioB'] = df.apply(lambda row: 'ML' + row['TIPO DE ANÚNCIO'][:2] if pd.notna(row['TIPO DE ANÚNCIO']) and row['EMPRESA'] == 'B' and row['MP'] == 'ML' else None, axis=1)                    
+                df['TipoAnuncioB'] = df.apply(
+                    lambda row: 'ML' + row['TIPO DE ANÚNCIO'][:2] if pd.notna(row['TIPO DE ANÚNCIO']) and row['EMPRESA'] == 'B' and row['MP'] == 'ML' else None,
+                    axis=1
+                )
                 df.drop(columns=['N.º DE VENDA', 'TIPO DE ANÚNCIO'], inplace=True)
             else:
-                # If 'MLB_Vendas' is not in all_data, create 'TipoAnuncioB' and fill with 'G' for EMPRESA == 'B' and MP == 'ML'
+                # previous behavior kept a default for B
                 df['TipoAnuncioB'] = df.apply(lambda row: 'MLG' if row['EMPRESA'] == 'B' and row['MP'] == 'ML' else None, axis=1)
 
-            # Merge Tipo de AnnuncioK/A/B into MP. Ensure that we only process rows where MP == 'ML'
+            # Merge TipoAnuncio K/A/B into MP (only if MP == 'ML')
             df['MP'] = df.apply(
                 lambda row: row['TipoAnuncioK'] if row['EMPRESA'] == 'K' and row['MP'] == 'ML' and pd.notna(row['TipoAnuncioK']) else
                             row['TipoAnuncioA'] if row['EMPRESA'] == 'A' and row['MP'] == 'ML' and pd.notna(row['TipoAnuncioA']) else
                             row['TipoAnuncioB'] if row['EMPRESA'] == 'B' and row['MP'] == 'ML' and pd.notna(row['TipoAnuncioB']) else row['MP'],
                 axis=1
             )
-            # Drop the now redundant columns
-            df.drop(columns=['TipoAnuncioK', 'TipoAnuncioA', 'TipoAnuncioB'], inplace=True)            
+            # Drop helper cols
+            df.drop(columns=['TipoAnuncioK', 'TipoAnuncioA', 'TipoAnuncioB'], inplace=True)
 
-            # Add column Compctmp (Comissão pct por Marketplace)
+            # Comissão por MP
             if 'T_RegrasMP' in all_data:
                 df = df.merge(
                     all_data['T_RegrasMP'][['MPX', 'TARMP', 'FFABAIXODE', 'FRETEFIX']],
@@ -492,77 +505,59 @@ def merge_all_data(all_data):
                     right_on='MPX',
                     how='left'
                 )
-                # Assign marketplace commission percentage
                 df['ComissPctMp'] = df['TARMP']
-
-                # Create the ComPct column based on the condition
                 df['ComissPctVlr'] = df['VLRVENDA'] * df['ComissPctMp'] * -1
-
-                # Assign fixed shipping fee based on VLRVENDA threshold
                 df['FreteFixoVlr'] = df.apply(
                     lambda row: -row['FRETEFIX'] if row['VLRVENDA'] < row['FFABAIXODE'] else 0,
                     axis=1
                 )
-                # Drop unnecessary columns
                 df.drop(columns=['MPX', 'TARMP', 'FFABAIXODE', 'FRETEFIX'], inplace=True)
 
-            # Compute FretePaiVlr based on T_FretesMP
+            # Frete por produto/MP
             if 'T_FretesMP' in all_data:
                 df_fretesmp = all_data['T_FretesMP']
-
-                # Extract first two letters of MP
                 df['MP_2L'] = df['MP'].str[:2].str.upper()
 
-                # Function to lookup the freight cost
                 def get_frete_pai(row):
                     codpp = row['CODPP']
                     mp_col = row['MP_2L']
-
-                    # Ensure the column exists in T_FretesMP
                     if mp_col not in df_fretesmp.columns:
-                        return 99  # If marketplace column doesn't exist, return 99
-
-                    # Try to find freight cost for the given CODPP
+                        return 99
                     match = df_fretesmp[df_fretesmp['CODPP'] == codpp]
                     if not match.empty:
-                        return match[mp_col].values[0]  # Return corresponding marketplace freight cost
-
-                    # If CODPP not found, use generic cost for 'XXX'
+                        return match[mp_col].values[0]
                     generic_match = df_fretesmp[df_fretesmp['CODPP'] == 'XXX']
                     if not generic_match.empty:
                         return generic_match[mp_col].values[0]
+                    return 99
 
-                    return 99  # Default to 0 if no match found
-
-                # Apply lookup function
                 df['FreteProdVlr'] = df.apply(lambda row: -get_frete_pai(row), axis=1)
-
-                # Drop temporary column MP_2L
                 df.drop(columns=['MP_2L'], inplace=True)
 
-            # Create column Rebate for later use
             df['Rebate'] = 0.0
             df['REPASSE'] = df['VLRVENDA'] + df['ComissPctVlr'] + df['FreteFixoVlr'] + df['FreteProdVlr'] + df['Rebate']
             df['ImpLP'] = df.apply(
                 lambda row: -0.0925 * row['VLRVENDA'] if row['EMPRESA'] == 'K' else
-                            -0.14 * row['VLRVENDA'] if row['EMPRESA'] == 'A' else
-                            -0.10 * row['VLRVENDA'] if row['EMPRESA'] == 'B' else 0,
+                            -0.14   * row['VLRVENDA'] if row['EMPRESA'] == 'A' else
+                            -0.10   * row['VLRVENDA'] if row['EMPRESA'] == 'B' else 0,
                 axis=1)
-            df['ImpICMS'] = df.apply(
-                lambda row: -0.18 * row['VLRVENDA'] if row['EMPRESA'] == 'K' else 0,
-                axis=1)
+            df['ImpICMS'] = df.apply(lambda row: -0.18 * row['VLRVENDA'] if row['EMPRESA'] == 'K' else 0, axis=1)
             df['ImpTot'] = df['ImpLP'] + df['ImpICMS']
-
             df['MargVlr'] = df.apply(
                 lambda row: 0 if row['EMPRESA'] == 'NC' else
                             row['REPASSE'] + row['ImpTot'] - row['ECTK'] - 1 - (0.01)*row['VLRVENDA'] if row['EMPRESA'] == 'K' else
                             row['REPASSE'] + row['ImpTot'] - 1.6 * row['ECTK'],
                 axis=1)
-
-            # Create column VerbaVLR (VerbaPCT x TotalNF)
             df['MargPct'] = df['MargVlr'] / df['VLRVENDA']
 
         elif key == 'MLA_Vendas':
+            if 'N.º DE VENDA' in df.columns:
+                df['N.º DE VENDA'] = df['N.º DE VENDA'].astype(str).str.strip()
+                print("Changed N.º de venda to str. Sample values:", df['N.º DE VENDA'].head().tolist())
+            if 'N.º DE VENDA_HYPERLINK' in df.columns:
+                df['N.º DE VENDA_HYPERLINK'] = df['N.º DE VENDA_HYPERLINK'].astype(str).str.strip()
+                print("Changed N.º de venda_hyperlink to str. Sample values:", df['N.º DE VENDA_HYPERLINK'].head().tolist())
+
             tot = None
             if 'VLRTOTALPSKU' in df.columns:
                 tot = pd.to_numeric(df['VLRTOTALPSKU'], errors='coerce').fillna(0)
@@ -570,112 +565,43 @@ def merge_all_data(all_data):
                 tot = pd.to_numeric(df['VlrTotalpSKU'], errors='coerce').fillna(0)
             else:
                 tot = pd.Series(0, index=df.index)
-            # Add the 'VALIDO' column directly
-            # --- normalize column name for total pSKU ---
             if 'VLRTOTALPSKU' not in df.columns and 'VlrTotalpSKU' in df.columns:
                 df.rename(columns={'VlrTotalpSKU': 'VLRTOTALPSKU'}, inplace=True)
-            ######## DEBUG
-            # ===== DEBUG: checar e padronizar coluna VLRTOTALPSKU =====
-            import unicodedata
-            def _norm(s):
-                if not isinstance(s, str):
-                    s = str(s)
-                s = unicodedata.normalize("NFKD", s)
-                s = "".join(ch for ch in s if not unicodedata.combining(ch))  # tira acentos
-                return "".join(ch for ch in s if ch.isalnum()).lower()        # alfanum, lower
 
-            print("\n[DEBUG MLK_Vendas] Colunas atuais:", list(df.columns))
-
-            # candidatos que vamos aceitar como "VLRTOTALPSKU"
-            targets = {"vlrtotalpsku", "vlrtotalpsku", "vlrtotalpsku"}  # redundante mas explícito
-            # também aceitaremos qualquer coisa que contenha a sequência-chave
-            needle = "vlrtotalpsku"
-
-            # 1) match exato por normalização
-            norm_map = {_norm(c): c for c in df.columns}
-            if "vlrtotalpsku" in norm_map and "VLRTOTALPSKU" not in df.columns:
-                print(f"[DEBUG MLK_Vendas] Renomeando coluna '{norm_map['vlrtotalpsku']}' -> 'VLRTOTALPSKU'")
-                df.rename(columns={norm_map["vlrtotalpsku"]: "VLRTOTALPSKU"}, inplace=True)
-            else:
-                # 2) tentar match por contains na forma normalizada
-                similar = [c for c in df.columns if needle in _norm(c)]
-                if similar and "VLRTOTALPSKU" not in df.columns:
-                    print(f"[DEBUG MLK_Vendas] Encontrada variação semelhante: {similar[0]} -> 'VLRTOTALPSKU'")
-                    df.rename(columns={similar[0]: "VLRTOTALPSKU"}, inplace=True)
-
-            # 3) logar status final e alguns hints úteis
-            print("[DEBUG MLK_Vendas] 'VLRTOTALPSKU' existe? ->", "VLRTOTALPSKU" in df.columns)
-            if "VLRTOTALPSKU" not in df.columns:
-                print("[DEBUG MLK_Vendas] Dicas: verifique se há algo como:",
-                    [c for c in df.columns if "vlr" in c.lower() and "sku" in c.lower()])
-
-            # 4) garantir tipo numérico para operações
-            if "VLRTOTALPSKU" in df.columns:
-                df["VLRTOTALPSKU"] = pd.to_numeric(df["VLRTOTALPSKU"], errors="coerce").fillna(0)
-            # ===== FIM DEBUG =====
-
-
-
-
-
-            # use o 'tot' que você já calculou acima
             df['Imposto1'] = tot * 0.11
             df['Imposto2'] = 0.0
-            df['ImpostoT']  = df['Imposto1'] + df['Imposto2']
-            #df['Imposto1'] = df['VLRTOTALPSKU']*(0.11)
-            #df['Imposto2'] = 0
-            #df['ImpostoT'] =  df['Imposto1'] + df['Imposto2']
+            df['ImpostoT'] = df['Imposto1'] + df['Imposto2']
 
             cols_to_drop = ['CODPF_x', 'CODPF_y', 'MLSTATUS']
             df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
 
         elif key == 'MLK_Vendas':
-            # Create column ECT (ECU x QTD)
             df['ECTK'] = df['ECU'] * df['QTD']
-
-            # Add the 'Impostos' columns directly
             df['Imposto1'] = df['VLRTOTALPSKU']*(0.0925)
             df['Imposto2'] = df['VLRTOTALPSKU']*(0.18)
             df['ImpostoT'] =  df['Imposto1'] + df['Imposto2']
-
-            # Create column MargCVlr
             df['MARGVLR'] = df['REPASSE'] - df['ImpostoT'] - df['ECTK'] - (1) -(.01)*df['VLRTOTALPSKU']
             df['MARGPCT'] = df['MARGVLR'] / df['VLRTOTALPSKU']
-
             cols_to_drop = ['CODPF_x', 'CODPF_y', 'MLSTATUS']
             df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
 
         elif key == 'O_CtasARec':
-            # Step 2: Create the 'DATA BASE' column which is the last day of the month
             df['DATA BASE'] = pd.to_datetime(df['ANOMES'], format='%y%m') + MonthEnd(0)
-            # Step 3: Calculate 'DIAS ATRASO'
             df['DIAS ATRASO'] = (df['DATA BASE'] - df['VENCIMENTO']).dt.days
-            # Step 4: Apply condition to set DIAS ATRASO to 0 if VENCIMENTO is greater than DATA BASE
             df['DIAS ATRASO'] = df['DIAS ATRASO'].apply(lambda x: max(0, x))
-            # Step 5: Classify 'DIAS ATRASO' using the classification table from all_data['T_CtasARecClass']
             df_ctas_a_rec_class = all_data['T_CtasARecClass']
-
-             # Step 6: Perform the range-based classification
             def classify_dias_atraso(row):
-                # Find the classification based on DIAS ATRASO falling within DEXDIAS and ATEXDIAS range
                 match = df_ctas_a_rec_class[
                     (df_ctas_a_rec_class['DEXDIAS'] <= row['DIAS ATRASO']) &
                     (row['DIAS ATRASO'] <= df_ctas_a_rec_class['ATEXDIAS'])
                 ]
                 return match['STATUS ATRASO'].iloc[0] if not match.empty else None
-            
-            # Apply the classification function to each row
             df['CLASSIFICACAO'] = df.apply(classify_dias_atraso, axis=1)
-        
-            # Filter out rows where the classification was not within the proper range
-            #df = df.dropna(subset=['CLASSIFICACAO'])
 
-        df = clean_dataframes({key: df})[key]  # Pass only the relevant table for modification
-        # Update the dataframe in all_data
+        df = clean_dataframes({key: df})[key]
         all_data[key] = df
 
     return all_data
-
 def preprocess_inventory_data(file_path):
     sheets = pd.read_excel(file_path, sheet_name=None, header=1)  # Load data with headers from the second row
     processed_sheets = {}
@@ -713,17 +639,21 @@ def merge_data(all_data, df1_name, df1_col, df2_name, df2_col, new_col=None, ind
 
     print(f"Columns in {df1_name} BEFORE merge: {df1.columns.tolist()}")
 
+    # Drop potential conflicting columns
     cols_to_drop = []
     if new_col and new_col in df1.columns:
         cols_to_drop.append(new_col)
-    # Só remover df2_col se NÃO for igual ao campo de junção (df1_col)
     if df2_col != df1_col and df2_col in df1.columns:
         cols_to_drop.append(df2_col)
-
     if cols_to_drop:
         print(f"⚠️  Dropping existing columns {cols_to_drop} from '{df1_name}' before merge.")
         all_data[df1_name] = all_data[df1_name].drop(columns=cols_to_drop)
         df1 = all_data[df1_name]
+
+    # --- Ensure dtype alignment for common numeric-like ids (rollback behavior) ---
+    for colname, frame in ((df1_col, df1), (df2_col, df2)):
+        if colname in frame.columns and colname in ['CÓDIGO PEDIDO', 'N.º DE VENDA']:
+            frame[colname] = frame[colname].astype(str).str.strip()
 
     # Faz o merge
     merged = df1.merge(
@@ -761,9 +691,6 @@ def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2
         df1.columns = [col.upper() for col in df1.columns]
         df2.columns = [col.upper() for col in df2.columns]
 
-        #print(f"Columns in {df1_name} before merge: {df1.columns}")
-        #print(f"Columns in {df2_name} before merge: {df2.columns}")
-
         if df1_col1 not in df1.columns or df1_col2 not in df1.columns or df2_col1 not in df2.columns or df2_col2 not in df2.columns:
             raise KeyError(f"One of the columns '{df1_col1}', '{df1_col2}', '{df2_col1}', '{df2_col2}' not found in dataframes.")
 
@@ -778,7 +705,12 @@ def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2
             print(f"⚠️  Dropping existing columns {cols_to_drop} from '{df1_name}' before merge_data2v.")
             df1 = df1.drop(columns=cols_to_drop)
 
-        merged_df = df1.merge(df2[df2_cols].drop_duplicates(), left_on=[df1_col1, df1_col2], right_on=[df2_col1, df2_col2], how='left')
+        merged_df = df1.merge(
+            df2[df2_cols].drop_duplicates(),
+            left_on=[df1_col1, df1_col2],
+            right_on=[df2_col1, df2_col2],
+            how='left'
+        )
 
         if df2_val_col and default_value is not None:
             merged_df[df2_val_col] = merged_df[df2_val_col].fillna(default_value)
@@ -786,7 +718,6 @@ def merge_data2v(all_data, df1_name, df1_col1, df1_col2, df2_name, df2_col1, df2
         # Rename the value column to the new column name
         merged_df.rename(columns={df2_val_col: new_col_name}, inplace=True)
 
-        #print(f"Columns after merge: {merged_df.columns}")
         all_data[df1_name] = merged_df
     return all_data
 
@@ -1434,101 +1365,180 @@ def perform_all_invaudits(all_data):
 
     return all_data
 
-def main():
-    # Define file patterns for each data type
+def main(year: int, month: int):
+    """
+    Build R_Resumo for the selected (year, month).
+    Expects a global `base_dir` already set.
+    Fails fast if required inputs are missing (preferred over silent bad results).
+    """
+    import os, shutil
+    import pandas as pd
+    from openpyxl import load_workbook
+    from openpyxl.utils.dataframe import dataframe_to_rows
+
+    # ---- month tag & paths
+    ano_mes = f"{year}_{month:02d}"
+    print(f"Base directory set to: {base_dir}")
+
+    template_file = os.path.join(base_dir, "Template", "PivotTemplate.xlsm")
+    out_dir       = os.path.join(base_dir, "clean", ano_mes)
+    os.makedirs(out_dir, exist_ok=True)
+    output_file   = os.path.join(out_dir, f"R_Resumo_{ano_mes}.xlsm")
+
+    # ---- copy & open template
+    shutil.copy(template_file, output_file)
+    print(f"✅ Copied template to {output_file}")
+    print("✅ Opening template with macros...")
+    wb_template = load_workbook(output_file, keep_vba=True)
+
+    # remove all template sheets to start fresh
+    for sh in wb_template.sheetnames[:]:
+        del wb_template[sh]
+    print(f"✅ Removed template sheets. Ready to write data...")
+
+    # ----------------------------------------------------------------------
+    # Load monthly CLEAN data
+    # ----------------------------------------------------------------------
     file_patterns = {
-        'O_NFCI': 'O_NFCI_{year_month}_clean.xlsx',
-        'L_LPI': 'L_LPI_{year_month}_clean.xlsx',
-        'MLA_Vendas': 'MLA_Vendas_{year_month}_clean.xlsx',
-        'MLK_Vendas': 'MLK_Vendas_{year_month}_clean.xlsx',
-        'O_CC': 'O_CC_{year_month}_clean.xlsx',
-        'O_CtasAPagar': 'O_CtasAPagar_{year_month}_clean.xlsx',
-        'O_CtasARec': 'O_CtasARec_{year_month}_clean.xlsx',
-        'MLK_ExtLib': 'MLK_ExtLib_{year_month}_clean.xlsx',
-        'SHK_Extrato': 'SHK_Extrato_{year_month}_clean.xlsx',
-        'MGK_Pacotes': 'MGK_Pacotes_{year_month}_clean.xlsx',
-        'MGK_Extrato': 'MGK_Extrato_{year_month}_clean.xlsx',
+        # REQUIRED clean files for a valid merge (fail-fast if missing):
+        "O_NFCI":        "O_NFCI_{ym}_clean.xlsx",
+        "L_LPI":         "L_LPI_{ym}_clean.xlsx",
+        "MLK_Vendas":    "MLK_Vendas_{ym}_clean.xlsx",
+        "O_CC":          "O_CC_{ym}_clean.xlsx",
+        "O_CtasAPagar":  "O_CtasAPagar_{ym}_clean.xlsx",
+        "O_CtasARec":    "O_CtasARec_{ym}_clean.xlsx",
+        # OPTIONAL (load if present; absence will not abort):
+        "MLA_Vendas":    "MLA_Vendas_{ym}_clean.xlsx",
+        "MLK_ExtLib":    "MLK_ExtLib_{ym}_clean.xlsx",
+        "SHK_Extrato":   "SHK_Extrato_{ym}_clean.xlsx",
+        "MGK_Pacotes":   "MGK_Pacotes_{ym}_clean.xlsx",
+        "MGK_Extrato":   "MGK_Extrato_{ym}_clean.xlsx",
     }
+    required_clean_keys = [
+        "O_NFCI", "L_LPI", "MLK_Vendas", "O_CC", "O_CtasAPagar", "O_CtasARec"
+    ]
 
     all_data = {}
-
+    missing_clean = []
     for key, pattern in file_patterns.items():
-        recent_data = load_recent_data(base_dir, pattern)
-        print(f"{key} data shape: {recent_data.shape}")  # Debug print
+        fpath = os.path.join(base_dir, "clean", ano_mes, pattern.format(ym=ano_mes))
+        if os.path.exists(fpath):
+            try:
+                df = pd.read_excel(fpath)
+                print(f"{key} data shape: {df.shape}")
+            except Exception as e:
+                print(f"Error reading {fpath}: {e}")
+                if key in required_clean_keys:
+                    missing_clean.append(f"{key} -> {fpath} (read error)")
+                df = pd.DataFrame()
+        else:
+            print(f"File not found: {fpath}")
+            if key in required_clean_keys:
+                missing_clean.append(f"{key} -> {fpath}")
+            df = pd.DataFrame()
 
-        # Ensure 'N.º de venda' is treated as string if the column exists
-        #if 'N.º de venda' in recent_data.columns:
-        #    recent_data['N.º de venda'] = recent_data['N.º de venda'].astype(str)
-        #if 'N.º de venda_hyperlink' in recent_data.columns:
-        #    recent_data['N.º de venda_hyperlink'] = recent_data['N.º de venda_hyperlink'].astype(str)
+        all_data[key] = df
 
-        # Ensure long numeric IDs remain as text before storing them
-        string_columns = ["ORDER_ID", "TRANSACTION_ID", "N.º de venda", "N.º de venda_hyperlink", "SHIPPING_ID", "SOURCE_ID", "EXTERNAL_REFERENCE"]  # Add more if needed
+    if missing_clean:
+        raise FileNotFoundError(
+            "Required CLEAN inputs missing for this month:\n  - " + "\n  - ".join(missing_clean)
+        )
 
-        for col in string_columns:
-            if col in recent_data.columns:
-                recent_data[col] = recent_data[col].astype(str)  # Ensure stored as text
-                print(f"Changed {col} to str. Sample values: {recent_data[col].head().tolist()}")
+    # ----------------------------------------------------------------------
+    # Load STATIC lookup tables (required for correct merges; fail-fast)
+    # ----------------------------------------------------------------------
+    static_dir = os.path.join(base_dir, "Tables")
+    static_files = {
+        "T_CondPagto":         "T_CondPagto.xlsx",
+        "T_Fretes":            "T_Fretes.xlsx",
+        "T_GruposCli":         "T_GruposCli.xlsx",
+        "T_MP":                "T_MP.xlsx",
+        "T_RegrasMP":          "T_RegrasMP.xlsx",
+        "T_Remessas":          "T_Remessas.xlsx",
+        "T_Reps":              "T_Reps.xlsx",
+        "T_Verbas":            "T_Verbas.xlsx",
+        "T_Vol":               "T_Vol.xlsx",
+        "T_ProdF":             "T_ProdF.xlsx",
+        "T_ProdP":             "T_ProdP.xlsx",
+        "T_Entradas":          "T_Entradas.xlsx",
+        "T_FretesMP":          "T_FretesMP.xlsx",
+        "T_MLStatus":          "T_MLStatus.xlsx",
+        "T_CtasAPagarClass":   "T_CtasAPagarClass.xlsx",
+        "T_CtasARecClass":     "T_CtasARecClass.xlsx",
+        "T_CCCats":            "T_CCCats.xlsx",
+    }
+    missing_static = []
+    for key, fname in static_files.items():
+        spath = os.path.join(static_dir, fname)
+        if os.path.exists(spath):
+            try:
+                sdf = pd.read_excel(spath)
+                all_data[key] = sdf
+                print(f"Static data {key} shape: {sdf.shape}")
+            except Exception as e:
+                print(f"Error reading static {spath}: {e}")
+                missing_static.append(f"{key} -> {spath} (read error)")
+        else:
+            print(f"⚠️  Static file not found: {spath}")
+            missing_static.append(f"{key} -> {spath}")
 
-        all_data[key] = recent_data
+    if missing_static:
+        raise FileNotFoundError(
+            "Required STATIC tables missing:\n  - " + "\n  - ".join(missing_static)
+        )
 
-    # Load static data
-    static_tables = ['T_CondPagto.xlsx', 'T_Fretes.xlsx', 'T_GruposCli.xlsx', 'T_MP.xlsx', 
-                     'T_RegrasMP.xlsx', 'T_Remessas.xlsx', 'T_Reps.xlsx', 'T_Verbas.xlsx', 'T_Vol.xlsx', 'T_ProdF.xlsx', 
-                     'T_ProdP.xlsx', 'T_Entradas.xlsx', 'T_FretesMP.xlsx', 'T_MLStatus.xlsx', 'T_CtasAPagarClass.xlsx',
-                     'T_CtasARecClass.xlsx', 'T_CCCats.xlsx']
-    static_data_dict = {table.replace('.xlsx', ''): load_static_data(static_dir, table) for table in static_tables}
-    
-    # Check static data shapes
-    for key, df in static_data_dict.items():
-        print(f"Static data {key} shape: {df.shape}")  # Debug print
-    
-    #inventory_data = preprocess_inventory_data(inventory_file_path)
-
-    # Add static data to all_data dictionary
-    all_data.update(static_data_dict)
-    #all_data.update(inventory_data)
-    
+    # --- restore old behavior: normalize headers BEFORE merges ---
     all_data = rename_columns(all_data, column_rename_dict)
 
-    # ... depois de carregar todos os dataframes para all_data ...
-    # 🔒 Garantir DataFrames vazios com colunas mínimas
-    if 'MLA_Vendas' not in all_data or all_data['MLA_Vendas'].empty:
-        all_data['MLA_Vendas'] = pd.DataFrame(columns=['N.º DE VENDA','TIPO DE ANÚNCIO'])
-    if 'MLK_Vendas' in all_data and all_data['MLK_Vendas'].empty:
-        all_data['MLK_Vendas'] = pd.DataFrame(columns=['N.º DE VENDA','TIPO DE ANÚNCIO'])
-    if 'MLB_Vendas' in all_data and all_data['MLB_Vendas'].empty:
-        all_data['MLB_Vendas'] = pd.DataFrame(columns=['N.º DE VENDA','TIPO DE ANÚNCIO'])
+    # --- ROLLBACK: cast keys to string *after* header normalization (old behavior) ---
+    if 'MLK_Vendas' in all_data and not all_data['MLK_Vendas'].empty:
+        df_mlk = all_data['MLK_Vendas']
+        if 'N.º DE VENDA' in df_mlk.columns:
+            df_mlk['N.º DE VENDA'] = df_mlk['N.º DE VENDA'].astype(str).str.strip()
+            print("Changed N.º de venda to str. Sample values:", df_mlk['N.º DE VENDA'].head().tolist())
+        if 'N.º DE VENDA_HYPERLINK' in df_mlk.columns:
+            df_mlk['N.º DE VENDA_HYPERLINK'] = df_mlk['N.º DE VENDA_HYPERLINK'].astype(str).str.strip()
+            print("Changed N.º de venda_hyperlink to str. Sample values:", df_mlk['N.º DE VENDA_HYPERLINK'].head().tolist())
+        all_data['MLK_Vendas'] = df_mlk
 
-    # Merge all data with static data
-    all_data = merge_all_data(all_data) 
+    if 'L_LPI' in all_data and not all_data['L_LPI'].empty:
+        df_lpi = all_data['L_LPI']
+        if 'CÓDIGO PEDIDO' in df_lpi.columns:
+            df_lpi['CÓDIGO PEDIDO'] = df_lpi['CÓDIGO PEDIDO'].astype(str).str.strip()
+        all_data['L_LPI'] = df_lpi
 
-    # Perform audits for the specified Marketplaces
-    all_data = perform_all_MP_audits(all_data)
-    print(f"Audit completed for ALL MARKETPLACES")
+    for k, df_any in list(all_data.items()):
+        if df_any is not None and not df_any.empty and 'CÓDIGO PEDIDO' in df_any.columns:
+            all_data[k]['CÓDIGO PEDIDO'] = all_data[k]['CÓDIGO PEDIDO'].astype(str).str.strip()
+    # --- end rollback block ---
 
-    # Perform audits for the specified clients
-    all_data = perform_all_audits(all_data)
-    print(f"Audit completed for clients: {', '.join(audit_client_names)}")
+    # ----------------------------------------------------------------------
+    # Merge + calculated columns (let it crash if something is structurally wrong)
+    # ----------------------------------------------------------------------
+    print("Creating Merged and Calculated Columns")
+    all_data = merge_all_data(all_data)
 
-    # Perform inventory audits for the specified clients
-    all_data = perform_all_invaudits(all_data)
-    print(f"INVENTORY Audit completed for clients: {', '.join(audit_client_names)}")
-
-   # Write to the existing template (wb_template)
+    # ----------------------------------------------------------------------
+    # Write each dataframe to the workbook
+    # ----------------------------------------------------------------------
     for key, df in all_data.items():
-        ws = wb_template.create_sheet(title=key)
-        for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
-            for c_idx, value in enumerate(row, 1):
-                ws.cell(row=r_idx, column=c_idx, value=value)
-        print(f"✅ Added {key} data to {output_file} in sheet {key}")  # Debug print
+        sheet_name = (key or "Sheet")[:31]  # Excel 31-char limit
+        ws = wb_template.create_sheet(title=sheet_name)
+        for row in dataframe_to_rows(df, index=False, header=True):
+            ws.append(row)
+        print(f"✅ Added {key} to workbook")
 
-    # Save the modified workbook
     wb_template.save(output_file)
     print(f"✅ All merged data saved to {output_file}")
 
-    excel_format(output_file, column_format_dict)
-    excel_autofilters(output_file)
+    # Optional formatting (only if your helpers are defined)
+    try:
+        excel_format(output_file, column_format_dict)
+        excel_autofilters(output_file)
+    except NameError:
+        pass
+
 
 if __name__ == "__main__":
-    main()
+    # use the month picked at the top (ano_x/mes_x) — identical to Conc_Estoque behavior
+    main(ano_x, mes_x)
