@@ -29,7 +29,7 @@ import re
 
 #Global
 ano_x = 2025
-mes_x = 8
+mes_x = 9
 
 # Format month as two digits (01, 02, ..., 12)
 mes_str = f"{mes_x:02d}"
@@ -463,7 +463,7 @@ def merge_all_data(all_data):
             # Add the 'TipoAnuncio' column for 'Baby Trends' and lookup in 'MLB_Vendas'
             if 'MLB_Vendas' in all_data:
                 df = df.merge(
-                    all_data['MLA_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
+                    all_data['MLB_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
                     left_on='CÓDIGO PEDIDO',
                     right_on='N.º DE VENDA',
                     how='left'
@@ -563,10 +563,68 @@ def merge_all_data(all_data):
             df['MargPct'] = df['MargVlr'] / df['VLRVENDA']
 
         elif key == 'MLA_Vendas':
+            tot = None
+            if 'VLRTOTALPSKU' in df.columns:
+                tot = pd.to_numeric(df['VLRTOTALPSKU'], errors='coerce').fillna(0)
+            elif 'VlrTotalpSKU' in df.columns:
+                tot = pd.to_numeric(df['VlrTotalpSKU'], errors='coerce').fillna(0)
+            else:
+                tot = pd.Series(0, index=df.index)
             # Add the 'VALIDO' column directly
-            df['Imposto1'] = df['VLRTOTALPSKU']*(0.11)
-            df['Imposto2'] = 0
-            df['ImpostoT'] =  df['Imposto1'] + df['Imposto2']
+            # --- normalize column name for total pSKU ---
+            if 'VLRTOTALPSKU' not in df.columns and 'VlrTotalpSKU' in df.columns:
+                df.rename(columns={'VlrTotalpSKU': 'VLRTOTALPSKU'}, inplace=True)
+            ######## DEBUG
+            # ===== DEBUG: checar e padronizar coluna VLRTOTALPSKU =====
+            import unicodedata
+            def _norm(s):
+                if not isinstance(s, str):
+                    s = str(s)
+                s = unicodedata.normalize("NFKD", s)
+                s = "".join(ch for ch in s if not unicodedata.combining(ch))  # tira acentos
+                return "".join(ch for ch in s if ch.isalnum()).lower()        # alfanum, lower
+
+            print("\n[DEBUG MLK_Vendas] Colunas atuais:", list(df.columns))
+
+            # candidatos que vamos aceitar como "VLRTOTALPSKU"
+            targets = {"vlrtotalpsku", "vlrtotalpsku", "vlrtotalpsku"}  # redundante mas explícito
+            # também aceitaremos qualquer coisa que contenha a sequência-chave
+            needle = "vlrtotalpsku"
+
+            # 1) match exato por normalização
+            norm_map = {_norm(c): c for c in df.columns}
+            if "vlrtotalpsku" in norm_map and "VLRTOTALPSKU" not in df.columns:
+                print(f"[DEBUG MLK_Vendas] Renomeando coluna '{norm_map['vlrtotalpsku']}' -> 'VLRTOTALPSKU'")
+                df.rename(columns={norm_map["vlrtotalpsku"]: "VLRTOTALPSKU"}, inplace=True)
+            else:
+                # 2) tentar match por contains na forma normalizada
+                similar = [c for c in df.columns if needle in _norm(c)]
+                if similar and "VLRTOTALPSKU" not in df.columns:
+                    print(f"[DEBUG MLK_Vendas] Encontrada variação semelhante: {similar[0]} -> 'VLRTOTALPSKU'")
+                    df.rename(columns={similar[0]: "VLRTOTALPSKU"}, inplace=True)
+
+            # 3) logar status final e alguns hints úteis
+            print("[DEBUG MLK_Vendas] 'VLRTOTALPSKU' existe? ->", "VLRTOTALPSKU" in df.columns)
+            if "VLRTOTALPSKU" not in df.columns:
+                print("[DEBUG MLK_Vendas] Dicas: verifique se há algo como:",
+                    [c for c in df.columns if "vlr" in c.lower() and "sku" in c.lower()])
+
+            # 4) garantir tipo numérico para operações
+            if "VLRTOTALPSKU" in df.columns:
+                df["VLRTOTALPSKU"] = pd.to_numeric(df["VLRTOTALPSKU"], errors="coerce").fillna(0)
+            # ===== FIM DEBUG =====
+
+
+
+
+
+            # use o 'tot' que você já calculou acima
+            df['Imposto1'] = tot * 0.11
+            df['Imposto2'] = 0.0
+            df['ImpostoT']  = df['Imposto1'] + df['Imposto2']
+            #df['Imposto1'] = df['VLRTOTALPSKU']*(0.11)
+            #df['Imposto2'] = 0
+            #df['ImpostoT'] =  df['Imposto1'] + df['Imposto2']
 
             cols_to_drop = ['CODPF_x', 'CODPF_y', 'MLSTATUS']
             df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
@@ -1432,6 +1490,15 @@ def main():
     #all_data.update(inventory_data)
     
     all_data = rename_columns(all_data, column_rename_dict)
+
+    # ... depois de carregar todos os dataframes para all_data ...
+    # 🔒 Garantir DataFrames vazios com colunas mínimas
+    if 'MLA_Vendas' not in all_data or all_data['MLA_Vendas'].empty:
+        all_data['MLA_Vendas'] = pd.DataFrame(columns=['N.º DE VENDA','TIPO DE ANÚNCIO'])
+    if 'MLK_Vendas' in all_data and all_data['MLK_Vendas'].empty:
+        all_data['MLK_Vendas'] = pd.DataFrame(columns=['N.º DE VENDA','TIPO DE ANÚNCIO'])
+    if 'MLB_Vendas' in all_data and all_data['MLB_Vendas'].empty:
+        all_data['MLB_Vendas'] = pd.DataFrame(columns=['N.º DE VENDA','TIPO DE ANÚNCIO'])
 
     # Merge all data with static data
     all_data = merge_all_data(all_data) 
