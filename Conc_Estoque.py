@@ -344,11 +344,15 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     entrs    = load_entradas(tables_dir, year, month)  # CODPF, QT_ENTRADAS, CU_ENTRADAS, CT_ENTRADAS
     prodf = load_prodf(tables_dir)
 
+
     inv_prev = inv_prev.merge(prodf, on="CODPF", how="left")
+    inv_prev["CODPP"] = inv_prev["CODPP"].fillna(inv_prev["CODPF"])
     inv_this = inv_this.merge(prodf, on="CODPF", how="left")
+    inv_this["CODPP"] = inv_this["CODPP"].fillna(inv_this["CODPF"])
     vendas_b = vendas_b.merge(prodf, on="CODPF", how="left")
     vendas_c = vendas_c.merge(prodf, on="CODPF", how="left")
-    entrs    = entrs.merge(prodf, on="CODPF", how="left")
+    entrs = entrs.merge(prodf, on="CODPF", how="left")
+    entrs["CODPP"] = entrs["CODPP"].fillna(entrs["CODPF"])
 
     # Renomeia inventários p/ INICIAL/FINAL
     inv_prev = inv_prev.rename(columns={"QT": "QT_INICIAL", "CU": "CU_INICIAL", "CT": "CT_INICIAL"})
