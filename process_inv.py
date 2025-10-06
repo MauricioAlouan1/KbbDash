@@ -44,10 +44,28 @@ else:
     base_dir = None
 
 # Define the date range variables
-start_year = 2025
-start_month = 8
-end_year = start_year
-end_month = start_month
+# ---- minimal prompt block (like Conc_Estoque.py) ----
+def _prompt_year_month():
+    import argparse
+    from datetime import datetime
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("--year", "-y", type=int)
+    ap.add_argument("--month", "-m", type=int)
+    args, _ = ap.parse_known_args()
+    if args.year is not None and args.month is not None:
+        return args.year, args.month
+    # If missing, ask interactively; defaults mimic Conc_Estoque.py (month defaults to previous)
+    now = datetime.now()
+    default_year = now.year if now.month > 1 else now.year - 1
+    default_month = now.month - 1 if now.month > 1 else 12
+    print("Year and/or month not provided.")
+    year = int(input(f"Enter year (default {default_year}): ") or default_year)
+    month = int(input(f"Enter month [1-12] (default {default_month}): ") or default_month)
+    return year, month
+
+start_year, start_month = _prompt_year_month()
+end_year, end_month = start_year, start_month
+# ---- end minimal prompt block ----
 
 # Function to process inventory files for a given month and year
 def process_inventory_files(year, month):
@@ -117,68 +135,266 @@ def process_inventory_files(year, month):
         return None
 
 
+def _write_cuem_in_place(xlsx_path, sheet_name, pai_to_cuem, cutoff_code):
+    """
+    Update only CUEm cells in-place on the given sheet, for rows with AnoMes == cutoff_code.
+    Keeps all formatting, formulas, and other sheets intact.
+    Requires headers: 'Pai', 'AnoMes', 'CUEm' in row 1 of the sheet.
+    Returns number of rows updated.
+    """
+    import openpyxl
 
-# Function to lookup CU values and additional columns
-# Function to lookup CU values and additional columns
+    wb = openpyxl.load_workbook(xlsx_path, data_only=False)  # keep formulas
+    if sheet_name not in wb.sheetnames:
+        raise ValueError(f"Sheet '{sheet_name}' not found in {xlsx_path}")
+    ws = wb[sheet_name]
+
+    header_cells = list(ws[1])
+    header_map = {str(c.value).strip(): c.col_idx for c in header_cells if c.value is not None}
+
+    required = ['Pai', 'AnoMes', 'CUEm']
+    missing = [c for c in required if c not in header_map]
+    if missing:
+        raise ValueError(
+            f"Sheet '{sheet_name}' must contain header(s): {', '.join(missing)}."
+        )
+
+    col_pai    = header_map['Pai']
+    col_anomes = header_map['AnoMes']
+    col_cuem   = header_map['CUEm']
+
+    updated = 0
+    max_row = ws.max_row
+    for r in range(2, max_row + 1):
+        anomes_val = ws.cell(row=r, column=col_anomes).value
+        pai_val    = ws.cell(row=r, column=col_pai).value
+        try:
+            anomes_code = int(str(anomes_val).strip())
+        except Exception:
+            continue
+        pai_key = (str(pai_val).strip() if pai_val is not None else '')
+        if anomes_code == cutoff_code and pai_key in pai_to_cuem:
+            ws.cell(row=r, column=col_cuem).value = float(pai_to_cuem[pai_key])
+            updated += 1
+
+    wb.save(xlsx_path)
+    return updated
+
 def lookup_cu_values(inventory_df, cutoff_date):
+    """
+    Father-only cost lookup with strict validation and robust matching.
 
-    try:
-        entradas_df = pd.read_excel(
-            os.path.join(base_dir, 'Tables', 'T_Entradas.xlsx'),
-            dtype={'Pai': str, 'Filho': str}
+    - Cutoff by AnoMes (YYMM).
+    - Per-entry effective cost: CUF (>0) -> CUEm (>0) -> (Ult CU R$ + AddR).
+    - Weighted average by (Pai, AnoMes) using Qt.
+    - For the cutoff month, writes weighted cost to T_Entradas.CUEm (Sheet1) IN-PLACE.
+    - Output KEEP 'Pai' and drop only helper mapping columns (CodPF_Prod, CodPP_Prod, UCP).
+    - FAILS FAST if any required column is missing.
+    - Prints explicit match counts so we can see what’s happening.
+    """
+    import numpy as np
+
+    print("[lookup_cu_values] START")
+
+    entradas_path = os.path.join(base_dir, 'Tables', 'T_Entradas.xlsx')
+    entradas_df = pd.read_excel(
+        entradas_path,
+        dtype={'Pai': str, 'Filho': str}
+    )
+    prodf_df = pd.read_excel(
+        os.path.join(base_dir, 'Tables', 'T_ProdF.xlsx'),
+        dtype={'CodPF': str, 'CodPP': str}
+    )
+
+    # ---- cutoff YYMM (guard for 2000–2099)
+    year = cutoff_date.year
+    month = cutoff_date.month
+    if not (2000 <= year <= 2099):
+        raise ValueError(f"Unsupported year {year}: YYMM logic expects 2000–2099.")
+    cutoff_code = (year - 2000) * 100 + month
+    print(f"[lookup_cu_values] cutoff YYMM = {cutoff_code}")
+
+    # ---- required columns (HARD FAIL)
+    req_entradas = ['AnoMes', 'Qt', 'Ult CU R$', 'AddR', 'Pai', 'CUF', 'CUEm']
+    missing_e = [c for c in req_entradas if c not in entradas_df.columns]
+    if missing_e:
+        raise KeyError(f"T_Entradas.xlsx missing required column(s): {', '.join(missing_e)}")
+
+    req_prodf = ['CodPF', 'CodPP']
+    missing_p = [c for c in req_prodf if c not in prodf_df.columns]
+    if missing_p:
+        raise KeyError(f"T_ProdF.xlsx missing required column(s): {', '.join(missing_p)}")
+
+    # ---- normalize helpers
+    def norm_str(x):
+        return '' if pd.isna(x) else str(x).strip()
+
+    def to_num_key(s):
+        s = norm_str(s)
+        return int(s) if s.isdigit() else np.nan
+
+    # ---- sanitization
+    entradas_df['AnoMes']     = pd.to_numeric(entradas_df['AnoMes'], errors='coerce').astype('Int64')
+    entradas_df               = entradas_df.dropna(subset=['AnoMes']).copy()
+    entradas_df['AnoMes']     = entradas_df['AnoMes'].astype(int)
+    entradas_df['Qt']         = pd.to_numeric(entradas_df['Qt'], errors='coerce').fillna(0.0)
+    entradas_df['Ult CU R$']  = pd.to_numeric(entradas_df['Ult CU R$'], errors='coerce').fillna(0.0)
+    entradas_df['AddR']       = pd.to_numeric(entradas_df['AddR'], errors='coerce').fillna(0.0)
+    entradas_df['CUF']        = pd.to_numeric(entradas_df['CUF'], errors='coerce').fillna(0.0)
+    entradas_df['CUEm']       = pd.to_numeric(entradas_df['CUEm'], errors='coerce').fillna(0.0)
+    entradas_df['Pai']        = entradas_df['Pai'].map(norm_str)
+
+    pre_rows = len(entradas_df)
+    entradas_df = entradas_df[entradas_df['AnoMes'] <= cutoff_code]
+    print(f"[lookup_cu_values] entradas rows <= cutoff: {len(entradas_df)} (from {pre_rows})")
+
+    # ---- father-only rows
+    pai_df = entradas_df[entradas_df['Pai'] != ''].copy()
+    print(f"[lookup_cu_values] pai rows <= cutoff: {len(pai_df)}")
+    if pai_df.empty:
+        print("[lookup_cu_values][WARN] No father entries up to cutoff; returning zeros.")
+        out = inventory_df.copy()
+        out['Codigo'] = out['Codigo'].astype(str)
+        out = out.rename(columns={'Quantidade': 'Quantidade_Inv', 'Codigo': 'Codigo_Inv'})
+        out['Pai'] = out['Codigo_Inv']
+        print(f"[lookup_cu_values] PF→PP mapped for {(out['CodPP_Prod']!='').sum()}/{len(out)} SKUs")
+
+        out['UCU'] = 0.0
+        out['UCT'] = 0.0
+        return out.drop(columns=['CodPF_Prod', 'CodPP_Prod', 'UCP'], errors='ignore')
+
+    pai_df['Pai_key_str'] = pai_df['Pai']
+    pai_df['Pai_key_num'] = pai_df['Pai'].apply(to_num_key)
+
+    # ---- per-entry effective cost priority
+    pai_df['EffCost'] = np.where(
+        pai_df['CUF'] > 0, pai_df['CUF'],
+        np.where(pai_df['CUEm'] > 0, pai_df['CUEm'], pai_df['Ult CU R$'] + pai_df['AddR'])
+    )
+    pai_df['CUxQ'] = pai_df['EffCost'] * pai_df['Qt']
+
+    # ---- monthly weighted averages
+    monthly_str = (
+        pai_df.groupby(['Pai_key_str', 'AnoMes'], as_index=False)
+              .agg({'CUxQ': 'sum', 'Qt': 'sum'})
+    )
+    monthly_num = (
+        pai_df.dropna(subset=['Pai_key_num'])
+             .groupby(['Pai_key_num', 'AnoMes'], as_index=False)
+             .agg({'CUxQ': 'sum', 'Qt': 'sum'})
+    )
+    print(f"[lookup_cu_values] monthly keys: str={len(monthly_str)} rows, num={len(monthly_num)} rows")
+
+    # ---- write CUEm for cutoff month (string key; sheet stores 'Pai' as text)
+    monthly_cutoff = monthly_str.loc[monthly_str['AnoMes'] == cutoff_code, ['Pai_key_str', 'CUxQ', 'Qt']].copy()
+    if not monthly_cutoff.empty:
+        monthly_cutoff['UCU_month'] = np.where(monthly_cutoff['Qt'] > 0, monthly_cutoff['CUxQ'] / monthly_cutoff['Qt'], 0.0)
+        pai_to_cuem = dict(zip(monthly_cutoff['Pai_key_str'], monthly_cutoff['UCU_month']))
+        updated = _write_cuem_in_place(entradas_path, 'Sheet1', pai_to_cuem, cutoff_code)
+        print(f"[CUEm] YYMM={cutoff_code}: {len(pai_to_cuem)} Pai(s) aggregated; wrote {updated} row(s) to Sheet1.")
+    else:
+        print(f"[CUEm] No entries in cutoff month YYMM={cutoff_code}; nothing to write.")
+
+    # ---- latest month per Pai (<= cutoff) → UCU
+    if monthly_str.empty and monthly_num.empty:
+        raise RuntimeError("[lookup_cu_values] No monthly data to compute last costs.")
+
+    if not monthly_str.empty:
+        idx_last_s = monthly_str.groupby('Pai_key_str')['AnoMes'].idxmax()
+        last_str = monthly_str.loc[idx_last_s, ['Pai_key_str', 'CUxQ', 'Qt']].copy()
+        last_str['UCU'] = np.where(last_str['Qt'] > 0, last_str['CUxQ'] / last_str['Qt'], 0.0)
+        last_str = last_str.rename(columns={'Pai_key_str': 'key_str'})[['key_str', 'UCU']]
+    else:
+        last_str = pd.DataFrame(columns=['key_str', 'UCU'])
+
+    if not monthly_num.empty:
+        idx_last_n = monthly_num.groupby('Pai_key_num')['AnoMes'].idxmax()
+        last_num = monthly_num.loc[idx_last_n, ['Pai_key_num', 'CUxQ', 'Qt']].copy()
+        last_num['UCU_num'] = np.where(last_num['Qt'] > 0, last_num['CUxQ'] / last_num['Qt'], 0.0)
+        last_num = last_num.rename(columns={'Pai_key_num': 'key_num'})[['key_num', 'UCU_num']]
+    else:
+        last_num = pd.DataFrame(columns=['key_num', 'UCU_num'])
+
+    # ---- prepare inventory & map PF→PP (father). Fallback: father = own code.
+    out = inventory_df.copy()
+    out['Codigo'] = out['Codigo'].astype(str)
+    out = out.rename(columns={'Quantidade': 'Quantidade_Inv', 'Codigo': 'Codigo_Inv'})
+
+    prodf_df = prodf_df.rename(columns={'CodPF': 'CodPF_Prod', 'CodPP': 'CodPP_Prod'})
+    prodf_df['CodPF_Prod'] = prodf_df['CodPF_Prod'].map(norm_str)
+    prodf_df['CodPP_Prod'] = prodf_df['CodPP_Prod'].map(norm_str)
+    out['Codigo_Inv']      = out['Codigo_Inv'].map(norm_str)
+
+    # --- pass 1: string key join
+    out = pd.merge(
+        out, prodf_df[['CodPF_Prod', 'CodPP_Prod']],
+        left_on='Codigo_Inv', right_on='CodPF_Prod', how='left'
+    )
+    # rows still needing a father code
+    need_map = out['CodPP_Prod'].isna() | (out['CodPP_Prod'] == '')
+
+    # --- pass 2: numeric key fallback (handles '001234' vs '1234')
+    def _to_num_key(s):
+        s = '' if pd.isna(s) else str(s).strip()
+        return int(s) if s.isdigit() else pd.NA
+
+    prodf_df['CodPF_num'] = prodf_df['CodPF_Prod'].apply(_to_num_key)
+    prodf_df['CodPP_num'] = prodf_df['CodPP_Prod'].apply(_to_num_key)
+    out['Codigo_num']     = out['Codigo_Inv'].apply(_to_num_key)
+
+    if need_map.any():
+        out.loc[need_map, ['Codigo_num']] = out.loc[need_map, 'Codigo_Inv'].apply(_to_num_key)
+        out = out.merge(
+            prodf_df[['CodPF_num', 'CodPP_Prod']].rename(columns={'CodPF_num': 'join_num'}),
+            left_on='Codigo_num', right_on='join_num', how='left'
         )
+        # fill from numeric join where string join failed
+        take_num = need_map & out['CodPP_Prod'].isna() & out['CodPP_Prod_y'].notna()
+        out.loc[take_num, 'CodPP_Prod'] = out.loc[take_num, 'CodPP_Prod_y']
+        out = out.drop(columns=['join_num', 'CodPP_Prod_y'], errors='ignore')
 
-        prodf_df = pd.read_excel(
-            os.path.join(base_dir, 'Tables', 'T_ProdF.xlsx'),
-            dtype={'CodPF': str, 'CodPP': str}
-        )
+    # final fallback: father = own code
+    out['CodPP_Prod'] = out['CodPP_Prod'].where(
+        out['CodPP_Prod'].notna() & (out['CodPP_Prod'] != ''), out['Codigo_Inv']
+    ).astype(str).str.strip()
 
-        # ➤ Converte a data da última entrada
-        entradas_df['Ultima Entrada'] = pd.to_datetime(entradas_df['Ultima Entrada'], errors='coerce')
-        entradas_df = entradas_df[entradas_df['Ultima Entrada'] <= cutoff_date]
+    # report must keep Pai → set Pai to mapped father code
+    out['Pai'] = out['CodPP_Prod']
 
-        # ➤ Último custo por Pai
-        last_cu_pai = (
-            entradas_df[entradas_df['Pai'].notna() & (entradas_df['Pai'] != '')]
-            .sort_values(['Pai', 'Ultima Entrada'])
-            .drop_duplicates(subset='Pai', keep='last')[['Pai', 'Ult CU R$']]
-            .rename(columns={'Ult CU R$': 'UCP'})
-        )
 
-        # ➤ Último custo por Filho
-        last_cu_filho = (
-            entradas_df[entradas_df['Filho'].notna() & (entradas_df['Filho'] != '')]
-            .sort_values(['Filho', 'Ultima Entrada'])
-            .drop_duplicates(subset='Filho', keep='last')[['Filho', 'Ult CU R$']]
-            .rename(columns={'Ult CU R$': 'UCF'})
-        )
+    # two join keys for robustness (string + numeric)
+    out['key_str'] = out['CodPP_Prod']
+    out['key_num'] = out['CodPP_Prod'].apply(to_num_key)
 
-        inventory_df['Codigo'] = inventory_df['Codigo'].astype(str)
-        inventory_df.rename(columns={'Quantidade': 'Quantidade_Inv', 'Codigo': 'Codigo_Inv'}, inplace=True)
+    # pass 1: string key
+    out = pd.merge(out, last_str, on='key_str', how='left')
+    matched1 = int(out['UCU'].notna().sum()); total = len(out)
+    print(f"[lookup_cu_values] matches after string-key merge: {matched1}/{total}")
 
-        prodf_df.rename(columns={'CodPF': 'CodPF_Prod', 'CodPP': 'CodPP_Prod'}, inplace=True)
+    # pass 2: numeric-key fallback
+    if not last_num.empty:
+        need = out['UCU'].isna()
+        if need.any():
+            tmp = out.loc[need, ['key_num']].merge(last_num, on='key_num', how='left')
+            out.loc[need, 'UCU'] = tmp['UCU_num'].values
 
-        inventory_df = pd.merge(inventory_df, prodf_df[['CodPF_Prod', 'CodPP_Prod']], 
-                                left_on='Codigo_Inv', right_on='CodPF_Prod', how='left')
+    matched2 = int(out['UCU'].notna().sum())
+    print(f"[lookup_cu_values] total matches after numeric-key fallback: {matched2}/{total}")
 
-        inventory_df = pd.merge(inventory_df, last_cu_pai, 
-                                left_on='CodPP_Prod', right_on='Pai', how='left')
+    # numerics & totals
+    out['Quantidade_Inv'] = pd.to_numeric(out['Quantidade_Inv'], errors='coerce').fillna(0.0)
+    out['UCU'] = pd.to_numeric(out['UCU'], errors='coerce').fillna(0.0)
+    out['UCT'] = out['UCU'] * out['Quantidade_Inv']
 
-        inventory_df = pd.merge(inventory_df, last_cu_filho, 
-                                left_on='Codigo_Inv', right_on='Filho', how='left')
+    # cleanup (keep Pai)
+    out = out.drop(columns=['CodPF_Prod', 'CodPP_Prod', 'UCP', 'key_str', 'key_num'], errors='ignore')
 
-        inventory_df['Quantidade_Inv'] = pd.to_numeric(inventory_df['Quantidade_Inv'], errors='coerce').fillna(0)
-        inventory_df['UCP'] = pd.to_numeric(inventory_df['UCP'], errors='coerce').fillna(0)
-        inventory_df['UCF'] = pd.to_numeric(inventory_df['UCF'], errors='coerce').fillna(0)
+    # hard guard: if everything zero, say it loudly
+    if float(out['UCU'].sum()) == 0.0:
+        print("[lookup_cu_values][WARN] All UCU are 0. Likely a key mismatch. Check PF/PP vs Pai formats and AnoMes filter.")
+    print("[lookup_cu_values] END")
 
-        inventory_df['UCU'] = inventory_df.apply(lambda row: row['UCP'] if row['UCP'] > 0 else row['UCF'], axis=1)
-        inventory_df['UCT'] = inventory_df['UCU'] * inventory_df['Quantidade_Inv']
-
-        return inventory_df
-
-    except Exception as e:
-        print(f"Error looking up CU values: {e}")
-        return None
+    return out
 
 
 # Main function to handle the process for all months within the date range
@@ -199,8 +415,10 @@ def process_all_months():
                 continue
 
             # Step 2: Lookup CU values and calculate UCU and UCT
-            cutoff_date = pd.Timestamp(year=year, month=month, day=1) + pd.offsets.MonthEnd(0)
+            cutoff_date = pd.Timestamp(year=year, month=month, day=1)
             final_df = lookup_cu_values(inventory_df, cutoff_date)
+            print(f"[pipeline] after lookup: UCU>0={(final_df['UCU']>0).sum()}/{len(final_df)} ; unique Pai={final_df['Pai'].nunique() if 'Pai' in final_df.columns else 'n/a'}")
+
 
             if final_df is None:
                 continue
