@@ -152,16 +152,36 @@ def lookup_cu_values(inventory_df, cutoff_date):
         )
 
         # ➤ Converte a data da última entrada
-        entradas_df['Ultima Entrada'] = pd.to_datetime(entradas_df['Ultima Entrada'], errors='coerce')
-        entradas_df = entradas_df[entradas_df['Ultima Entrada'] <= cutoff_date]
+        # ➤ Remove rows with missing Pai and convert AnoMes
+        entradas_df = entradas_df[entradas_df['Pai'].notna() & (entradas_df['Pai'] != '')].copy()
+        #entradas_df['AnoMes'] = entradas_df['AnoMes'].astype(str).str.zfill(4).astype(int)
+        cutoff_anomes = (cutoff_date.year - 2000) * 100 + cutoff_date.month + 0
 
-        # ➤ Último custo por Pai
-        last_cu_pai = (
-            entradas_df[entradas_df['Pai'].notna() & (entradas_df['Pai'] != '')]
-            .sort_values(['Pai', 'Ultima Entrada'])
-            .drop_duplicates(subset='Pai', keep='last')[['Pai', 'Ult CU R$']]
-            .rename(columns={'Ult CU R$': 'UCP'})
+        # ➤ Filter only up to cutoff
+        entradas_cutoff = entradas_df[entradas_df['AnoMes'] <= cutoff_anomes].copy()
+
+        # ➤ Split entries into two categories
+        # 1. Before current month → keep latest row per Pai (CUF already computed)
+        latest_before = (
+            entradas_cutoff[entradas_cutoff['AnoMes'] < cutoff_anomes]
+            .sort_values(['Pai', 'AnoMes'])
+            .drop_duplicates(subset='Pai', keep='last')[['Pai', 'CUF']]
+            .rename(columns={'CUF': 'UCP'})
         )
+
+        # 2. Current month → compute CUEm weighted avg per Pai
+        current_month_df = entradas_cutoff[entradas_cutoff['AnoMes'] == cutoff_anomes].copy()
+        current_month_df['WeightedCU'] = (current_month_df['Ult CU R$'] + current_month_df['AddR']) * current_month_df['Qt']
+        cuem = (
+            current_month_df.groupby('Pai')
+            .agg({'WeightedCU': 'sum', 'Qt': 'sum'})
+            .query('Qt > 0')
+            .assign(CUEm=lambda x: x['WeightedCU'] / x['Qt'])[['CUEm']]
+            .reset_index()
+        )
+
+        # ➤ Merge both UCP (CUF) and CUEm
+        cu_final = pd.merge(latest_before, cuem, on='Pai', how='outer')
 
 
         inventory_df['Codigo'] = inventory_df['Codigo'].astype(str)
@@ -172,13 +192,14 @@ def lookup_cu_values(inventory_df, cutoff_date):
         inventory_df = pd.merge(inventory_df, prodf_df[['CodPF_Prod', 'CodPP_Prod']], 
                                 left_on='Codigo_Inv', right_on='CodPF_Prod', how='left')
 
-        inventory_df = pd.merge(inventory_df, last_cu_pai, 
+        inventory_df = pd.merge(inventory_df, cu_final,
                                 left_on='CodPP_Prod', right_on='Pai', how='left')
 
         inventory_df['Quantidade_Inv'] = pd.to_numeric(inventory_df['Quantidade_Inv'], errors='coerce').fillna(0)
         inventory_df['UCP'] = pd.to_numeric(inventory_df['UCP'], errors='coerce').fillna(0)
 
-        inventory_df['UCU'] = inventory_df['UCP']
+        # Use CUF if available; otherwise use CUEm
+        inventory_df['UCU'] = inventory_df['UCP'].where(inventory_df['UCP'] > 0, inventory_df['CUEm'])
         inventory_df['UCT'] = inventory_df['UCU'] * inventory_df['Quantidade_Inv']
 
         return inventory_df
