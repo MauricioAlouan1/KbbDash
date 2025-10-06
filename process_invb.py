@@ -28,6 +28,7 @@ from openpyxl.styles import NamedStyle
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import Font, PatternFill
 from openpyxl import Workbook, load_workbook
+from openpyxl.cell.cell import Cell
 import sys
 
 # Define the base directory as before, now adding the /clean part
@@ -166,7 +167,7 @@ def lookup_cu_values(inventory_df, cutoff_date):
             entradas_cutoff[entradas_cutoff['AnoMes'] < cutoff_anomes]
             .sort_values(['Pai', 'AnoMes'])
             .drop_duplicates(subset='Pai', keep='last')[['Pai', 'CUF']]
-            .rename(columns={'CUF': 'UCP'})
+            .rename(columns={'CUF': 'CUF'})
         )
 
         # 2. Current month → compute CUEm weighted avg per Pai
@@ -196,11 +197,18 @@ def lookup_cu_values(inventory_df, cutoff_date):
                                 left_on='CodPP_Prod', right_on='Pai', how='left')
 
         inventory_df['Quantidade_Inv'] = pd.to_numeric(inventory_df['Quantidade_Inv'], errors='coerce').fillna(0)
-        inventory_df['UCP'] = pd.to_numeric(inventory_df['UCP'], errors='coerce').fillna(0)
+        inventory_df['CUF'] = pd.to_numeric(inventory_df['CUF'], errors='coerce').fillna(0)
+        inventory_df['CUEm'] = pd.to_numeric(inventory_df['CUEm'], errors='coerce').fillna(0)
+
 
         # Use CUF if available; otherwise use CUEm
-        inventory_df['UCU'] = inventory_df['UCP'].where(inventory_df['UCP'] > 0, inventory_df['CUEm'])
-        inventory_df['UCT'] = inventory_df['UCU'] * inventory_df['Quantidade_Inv']
+        inventory_df['CUU'] = inventory_df['CUF'].where(inventory_df['CUF'] > 0, inventory_df['CUEm'])
+        inventory_df['UCT'] = inventory_df['CUU'] * inventory_df['Quantidade_Inv']
+
+        # Atualiza a planilha T_Entradas.xlsx com CUEm apenas para o mês atual
+        if not cuem.empty:
+            entrada_path = os.path.join(base_dir, 'Tables', 'T_Entradas.xlsx')
+            atualiza_cuem_em_excel(cuem_df=cuem, cutoff_anomes=cutoff_anomes, excel_path=entrada_path)
 
         return inventory_df
 
@@ -208,6 +216,65 @@ def lookup_cu_values(inventory_df, cutoff_date):
         print(f"Error looking up CU values: {e}")
         return None
 
+from openpyxl import load_workbook
+
+def atualiza_cuem_em_excel(cuem_df, cutoff_anomes, excel_path):
+    """
+    Atualiza a coluna 'CUEm' na aba 'Sheet1' da planilha T_Entradas.xlsx
+    Apenas para linhas com:
+    - AnoMes == cutoff_anomes
+    - CUEm em branco (None ou "")
+    - Pai presente na lista calculada
+    A função mantém toda a formatação original da planilha.
+    """
+    try:
+        wb = load_workbook(excel_path)
+        ws = wb['Sheet1']
+
+        # Criar dicionário {Pai: CUEm} com códigos como texto
+        cuem_dict = cuem_df.set_index('Pai')['CUEm'].to_dict()
+
+        # Mapear colunas por nome
+        headers = {cell.value: idx for idx, cell in enumerate(next(ws.iter_rows(min_row=1, max_row=1)), start=1)}
+        col_pai = headers.get("Pai")
+        col_anomes = headers.get("AnoMes")
+        col_cuem = headers.get("CUEm")
+
+        if not (col_pai and col_anomes and col_cuem):
+            raise Exception("Colunas Pai, AnoMes ou CUEm não encontradas na planilha.")
+
+        atualizados = 0
+
+        for row in ws.iter_rows(min_row=2):
+            pai_cell = row[col_pai - 1]
+            anomes_cell = row[col_anomes - 1]
+            cuem_cell = row[col_cuem - 1]
+
+            pai_val = str(pai_cell.value).strip() if pai_cell.value is not None else None
+            anomes_raw = anomes_cell.value
+
+            # Verificações de segurança
+            if pai_val is None or pai_val == "" or pai_val not in cuem_dict:
+                continue
+
+            try:
+                anomes = int(anomes_raw)
+            except (TypeError, ValueError):
+                continue  # pula células com fórmula ou valor inválido
+
+            if anomes != cutoff_anomes:
+                continue
+
+            # Só preenche se CUEm atual está em branco
+            if cuem_cell.value in (None, "", " "):
+                ws.cell(row=pai_cell.row, column=col_cuem, value=float(cuem_dict[pai_val]))
+                atualizados += 1
+
+        wb.save(excel_path)
+        print(f"[✓] {atualizados} valores de CUEm inseridos na planilha T_Entradas.xlsx (mês {cutoff_anomes})")
+
+    except Exception as e:
+        print(f"[ERRO] Falha ao atualizar CUEm em T_Entradas.xlsx: {e}")
 
 # Main function to handle the process for all months within the date range
 def process_all_months():
@@ -235,6 +302,9 @@ def process_all_months():
 
             # Add AnoMes
             final_df['AnoMes'] = (year % 100) * 100 + month
+            # Drop unwanted columns
+            final_df.drop(columns=['CodPF_Prod', 'CodPP_Prod'], inplace=True, errors='ignore')
+
             # Step 3: Save the resulting dataframe to a new Excel file
             output_filepath = os.path.join(base_dir, 'clean',f'{year}_{month:02d}', f'R_Estoq_fdm_{year}_{month:02d}.xlsx')
             final_df.to_excel(output_filepath, index=False, sheet_name='Data')
@@ -250,7 +320,7 @@ def format_and_add_pivot(output_filepath, df, year, month):
     
     # Apply number format to specified columns
     number_format = '#,##0.00'
-    columns_to_format = ['UCP', 'UCF', 'UCU', 'UCT']
+    columns_to_format = ['CUF', 'CUEm', 'CUU', 'UCT']
     # Add autofilter to the pivot table
     ws.auto_filter.ref = ws.dimensions
 
