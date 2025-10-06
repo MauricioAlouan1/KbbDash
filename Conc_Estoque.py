@@ -56,9 +56,9 @@ SHEET_LLPI   = "L_LPI"
 # <<< HARD-CODE AQUI: nomes das COLUNAS por aba/tabela
 # PT01 (estoque)
 PT01_CODE_COL = "Codigo_Inv"                # ex.: "CODPF" ou "Código do Produto"
-PT01_QTY_COL  = "Total"                     # ex.: "QT" ou "Qt_Final" ou "ESTOQUE"
-PT01_CU_COL   = "Unit Cost"                 # ex.: "Ult CU R$" ou "CU"
-PT01_CT_COL   = "Total Cost"                # ex.: "Custo Total" ou "CT" (pode deixar None e o script calcula CU*QT)
+PT01_QTY_COL  = "QtSS"                     # ex.: "QT" ou "Qt_Final" ou "ESTOQUE"
+PT01_CU_COL   = "CUEx"                 # ex.: "Ult CU R$" ou "CU"
+PT01_CT_COL   = "CT_UEx"                # ex.: "Custo Total" ou "CT" (pode deixar None e o script calcula CU*QT)
 # Se não existir, coloque None (o script calcula CT = CU*QT)
 
 # O_NFCI (vendas 2b)
@@ -74,9 +74,9 @@ LLPI_EMPRESA_COL = "EMPRESA"           # usado para filtrar == "K"
 # T_Entradas (entradas do mês)
 ENTR_CODE_COL   = "Filho"              # ex.: "CODPF", "Pai"
 ENTRP_CODE_COL   = "Pai"              # ex.: "CODPF", "Pai"
-ENTR_QTY_COL    = "Qt"                 # ex.: "QT", "Qtde"
-ENTR_CU_COL     = "Ult CU R$"                 # ex.: "CU" (se não tiver, use None)
-ENTR_CT_COL     = "Ult CT"                 # ex.: "CT" (se não tiver, use None e calcula QT*CU)
+ENTR_QTY_COL    = "QtEP"                 # ex.: "QT", "Qtde"
+ENTR_CU_COL     = "CUE"                 # ex.: "CU" (se não tiver, use None)
+ENTR_CT_COL     = "CT_UE"                 # ex.: "CT" (se não tiver, use None e calcula QT*CU)
 # Filtragem por mês:
 ENTR_ANOMES_COL = "AnoMes"             # yymm (ex.: 2507). Se não existir, use None.
 ENTR_DATE_COL   = None                 # OU nome da data (ex.: "Emissao" ou "Ultima Entrada") se preferir filtrar por data
