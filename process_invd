@@ -44,7 +44,6 @@ else:
     base_dir = None
 
 # Define the date range variables
-# ---- minimal prompt block (like Conc_Estoque.py) ----
 def _prompt_year_month():
     import argparse
     from datetime import datetime
@@ -54,7 +53,7 @@ def _prompt_year_month():
     args, _ = ap.parse_known_args()
     if args.year is not None and args.month is not None:
         return args.year, args.month
-    # If missing, ask interactively; defaults mimic Conc_Estoque.py (month defaults to previous)
+    # If missing, ask interactively; defaults
     now = datetime.now()
     default_year = now.year if now.month > 1 else now.year - 1
     default_month = now.month - 1 if now.month > 1 else 12
@@ -147,10 +146,10 @@ def create_pivot_sheet(wb, df, group_col, sheet_name, year, month):
         fill_value=0
     )
 
-    pivot_table['QtSSx'] = pivot_table.sum(axis=1)
-    pCT_UE = df.groupby(group_col)['CT_UE'].sum()
-    pivot_table['CT_UEx'] = pCT_UE
-    pivot_table['CUEx'] = pivot_table['CT_UEx'] / pivot_table['QtSSx']
+    pivot_table['Qt_SS'] = pivot_table.sum(axis=1)
+    pCT_E = df.groupby(group_col)['CT_E'].sum()
+    pivot_table['CT_E'] = pCT_E
+    pivot_table['CU_E'] = pivot_table['CT_E'] / pivot_table['Qt_SS']
     pivot_table['AnoMes'] = (year % 100) * 100 + month
 
     pivot_table = pivot_table.reset_index()
@@ -176,12 +175,12 @@ def create_pivot_sheet(wb, df, group_col, sheet_name, year, month):
         total_value = pivot_table[col_name].sum()
         cell = ws.cell(row=totals_row_idx, column=col_idx, value=total_value)
         cell.font = Font(bold=True)
-        if col_name in ['CT_UEx', 'CUEx']:
+        if col_name in ['CT_E', 'CU_E']:
             cell.number_format = number_format
 
     # Estilo especial para colunas de totais
     gray_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
-    for col_name in ['QtSSx', 'CT_UEx', 'CUEx']:
+    for col_name in ['Qt_SS', 'CT_E', 'CU_E']:
         if col_name in pivot_table.columns:
             col_idx = pivot_table.columns.get_loc(col_name) + 1
             for row in range(2, totals_row_idx + 1):
@@ -216,7 +215,7 @@ def lookup_cu_values(inventory_df, cutoff_date):
             entradas_df[entradas_df['Pai'].notna() & (entradas_df['Pai'] != '')]
             .sort_values(['Pai', 'Ultima Entrada'])
             .drop_duplicates(subset='Pai', keep='last')[
-                ['Pai', 'CUE', 'PGE', 'CUPI', 'CUSP', 'CUPF', 'QtIP', 'QtEP', 'QtSP']
+                ['Pai', 'CU_E', 'PGE', 'CU_I', 'CU_S', 'CU_F', 'Qt_I', 'Qt_E', 'Qt_S']
             ]
         )
 
@@ -234,9 +233,9 @@ def lookup_cu_values(inventory_df, cutoff_date):
 
         inventory_df['Quantidade_Inv'] = pd.to_numeric(inventory_df['Quantidade_Inv'], errors='coerce').fillna(0)
 
-        inventory_df['CT_UE'] = inventory_df['CUE'] * inventory_df['Quantidade_Inv']
-        inventory_df['CT_PI'] = inventory_df['CUPI'] * inventory_df['Quantidade_Inv']
-        inventory_df['CT_PF'] = inventory_df['CUPF'] * inventory_df['Quantidade_Inv']
+        inventory_df['CT_E'] = inventory_df['CU_E'] * inventory_df['Quantidade_Inv']
+        inventory_df['CT_I'] = inventory_df['CU_I'] * inventory_df['Quantidade_Inv']
+        inventory_df['CT_F'] = inventory_df['CU_F'] * inventory_df['Quantidade_Inv']
 
         return inventory_df
 
@@ -286,7 +285,7 @@ def add_pivot_by_filho(output_filepath, df, year, month):
     # Formatar a aba 'Data'
     ws = wb['Data']
     number_format = '#,##0.00'
-    columns_to_format = ['CUE', 'PGE', 'CUPI', 'CUSP', 'CUPF', 'CT_UE', 'CT_PI', 'CT_PF']
+    columns_to_format = ['CU_E', 'PGE', 'CU_I', 'CU_S', 'CU_F', 'CT_E', 'CT_I', 'CT_F']
     for col in columns_to_format:
         if col in df.columns:
             col_idx = df.columns.get_loc(col) + 1

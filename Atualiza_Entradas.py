@@ -40,22 +40,22 @@ def resolve_base_dir():
 def load_entrada_df(file_path: str) -> pd.DataFrame:
     df = pd.read_excel(file_path, dtype={'Pai': str, 'Filho': str})
     df["AnoMes"] = pd.to_numeric(df["AnoMes"], errors="coerce").astype("Int64")
-    df["CUE"] = pd.to_numeric(df["CUE"], errors="coerce")
-    df["CUPF"] = pd.to_numeric(df["CUPF"], errors="coerce")
+    df["CU_E"] = pd.to_numeric(df["CU_E"], errors="coerce")
+    df["CU_F"] = pd.to_numeric(df["CU_F"], errors="coerce")
     return df
 
 def build_prior_cupf_lookup(df: pd.DataFrame, target_ano_mes: int) -> pd.DataFrame:
     prior = df[df["AnoMes"].notna() & (df["AnoMes"] < target_ano_mes)].copy()
     return (
         prior.sort_values(["Pai", "AnoMes"])
-             .drop_duplicates("Pai", keep="last")[["Pai", "CUPF"]]
-             .rename(columns={"CUPF": "CUPF_prior"})
+             .drop_duplicates("Pai", keep="last")[["Pai", "CU_F"]]
+             .rename(columns={"CU_F": "CU_F_prior"})
     )
 
 def apply_cupi_values(df: pd.DataFrame, target_ano_mes: int) -> pd.DataFrame:
     prior_cupf = build_prior_cupf_lookup(df, target_ano_mes)
     df = df.merge(prior_cupf, on="Pai", how="left")
-    df["CUPI_calc"] = df["CUPF_prior"].where(df["CUPF_prior"].notna(), df["CUE"])
+    df["CUPI_calc"] = df["CU_F_prior"].where(df["CU_F_prior"].notna(), df["CU_E"])
     return df
 
 # ─────────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ def apply_qtip_values(df: pd.DataFrame, target_ano_mes: int, base_dir: str, year
     prev_df["CodPP"] = prev_df["CodPP"].astype(str).str.strip()
 
     df = df.merge(prev_df, left_on="Pai", right_on="CodPP", how="left")
-    df["QtIP_calc"] = df["QtGerx"].fillna(0)
+    df["QtIP_calc"] = df["Qt_Ger"].fillna(0)
     return df
 
 def calculate_qtsp_from_resumo(base_dir: str, year: int, month: int) -> pd.DataFrame:
@@ -140,12 +140,12 @@ def calculate_qtsp_from_resumo(base_dir: str, year: int, month: int) -> pd.DataF
 
     # Junta tudo
     df_all = pd.concat(vendas, axis=0)
-    df_all = df_all.groupby("CODPP", as_index=False)["QTD"].sum().rename(columns={"QTD": "QtSP"})
+    df_all = df_all.groupby("CODPP", as_index=False)["QTD"].sum().rename(columns={"QTD": "Qt_S"})
 
     df_all["Pai"] = df_all["CODPP"].astype(str).str.upper().str.strip()
 
     # Agrupa por Pai
-    final_df = df_all.groupby("Pai", as_index=False)["QtSP"].sum()
+    final_df = df_all.groupby("Pai", as_index=False)["Qt_S"].sum()
     print(final_df.head())
 
     return final_df
@@ -162,8 +162,8 @@ def load_previous_qtgerx(base_dir: str, prev_year: int, prev_month: int) -> pd.D
     
     df = pd.read_excel(file_path, sheet_name="PT_pp", dtype={"Pai": str})
     df["CodPP"] = df["Pai"].astype(str).str.strip()
-    df["QtGerx"] = pd.to_numeric(df["QtGerx"], errors="coerce").fillna(0)
-    return df[["CodPP", "QtGerx"]]
+    df["Qt_Ger"] = pd.to_numeric(df["Qt_Ger"], errors="coerce").fillna(0)
+    return df[["CodPP", "Qt_Ger"]]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -194,17 +194,17 @@ def main():
     df = load_entrada_df(file_path)
     df = apply_cupi_values(df, ano_mes)
     df = apply_qtip_values(df, ano_mes, base_dir, year, month)
-    # Calcular QtSP por Pai
+    # Calcular Qt_S por Pai
     qtsp_df = calculate_qtsp_from_resumo(base_dir, year, month)
-    # Mapear valores de QtSP baseados na coluna 'Pai'
-    qtsp_map = qtsp_df.set_index("Pai")["QtSP"].to_dict()
-    df["QtSP"] = df["Pai"].map(qtsp_map)
+    # Mapear valores de Qt_S baseados na coluna 'Pai'
+    qtsp_map = qtsp_df.set_index("Pai")["Qt_S"].to_dict()
+    df["Qt_S"] = df["Pai"].map(qtsp_map)
 
-    aligned_qtsp_series = df.set_index("Pai").index.map(qtsp_df.set_index("Pai")["QtSP"].to_dict())
-    df["QtSP"] = aligned_qtsp_series
+    aligned_qtsp_series = df.set_index("Pai").index.map(qtsp_df.set_index("Pai")["Qt_S"].to_dict())
+    df["Qt_S"] = aligned_qtsp_series
     written = write_column_to_excel(
         df, excel_path=file_path, out_path=out_path,
-        ano_mes=ano_mes, column_name="CUPI", values_series=df["CUPI_calc"]
+        ano_mes=ano_mes, column_name="CU_I", values_series=df["CU_I_calc"]
     )
     print(f"✅ Wrote {written} CUPI values for AnoMes {ano_mes}")    
  
@@ -215,17 +215,17 @@ def main():
     print(f"✅ Wrote {written_qtip} QtIP values for AnoMes {ano_mes}")
 
     # Escrever no Excel
-    #print("\n📦 Debug QtSP: valores a escrever:")
-    #print(qtsp_df[["Pai", "QtSP"]].to_string(index=False))
+    #print("\n📦 Debug Qt_S: valores a escrever:")
+    #print(qtsp_df[["Pai", "Qt_S"]].to_string(index=False))
 
     written_qtsp = write_column_to_excel(
         df, excel_path=file_path,
         out_path=out_path,
         ano_mes=ano_mes,
-        column_name="QtSP",
-        values_series=qtsp_df.set_index("Pai")["QtSP"]
+        column_name="Qt_S",
+        values_series=qtsp_df.set_index("Pai")["Qt_S"]
     )
-    print(f"✅ Wrote {written_qtsp} QtSP values for AnoMes {ano_mes}")
+    print(f"✅ Wrote {written_qtsp} Qt_S values for AnoMes {ano_mes}")
 
     print(f"💾 Saved to: {out_path}")
 # ─────────────────────────────────────────────────────────────

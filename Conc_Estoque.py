@@ -12,7 +12,7 @@ Inputs (auto-resolved from 2 candidate base folders):
 
 Output:
 CSV + Excel with columns:
-CODPF, QtIP, CUPI, CT_PI, VENDAS_2b, VENDAS_2c, QtEP, CUE, CT_UE, QtSSx, CU_FINAL, CT_FINAL
+CODPF, QT_I, CU_I, CT_I, VENDAS_2b, VENDAS_2c, Qt_E, CU_E, CT_E, Qt_SS, CU_F, CT_Ger
 """
 
 from __future__ import annotations
@@ -57,14 +57,14 @@ SHEET_LLPI   = "L_LPI"
 # PT01 (estoque)
 PT01_CODE_COL = "Codigo_Inv"                # ex.: "CODPF" ou "Código do Produto"
 
-PT01_QtSSx_COL  = "QtSSx"                     # ex.: "QT" ou "QtSSx" ou "ESTOQUE"
-PT01_QtGer_COL  = "QtGerx"                     # ex.: "QT" ou "QtSSx" ou "ESTOQUE"
+PT01_Qt_SS_COL  = "Qt_SS"                     # ex.: "QT" ou "Qt_SS" ou "ESTOQUE"
+PT01_QtGer_COL  = "Qt_Ger"                     # ex.: "QT" ou "Qt_SS" ou "ESTOQUE"
 
-PT01_CU_COL   = "CUEx"                 # ex.: "Ult CU R$" ou "CU"
-PT01_CUPF_COL   = "CUPFx"                 # ex.: "Ult CU R$" ou "CU"
+PT01_CU_COL   = "CU_E"                # ex.: "Ult CU R$" ou "CU"
+PT01_CUPF_COL   = "CU_F"                 # ex.: "Ult CU R$" ou "CU"
 
-PT01_CT_COL   = "CT_UEx"                # ex.: "Custo Total" ou "CT" (pode deixar None e o script calcula CU*QT)
-PT01_CT_PFx_COL   = "CT_PFx"                # ex.: "Custo Total" ou "CT" (pode deixar None e o script calcula CU*QT)
+PT01_CT_COL   = "CT_E"                # ex.: "Custo Total" ou "CT" (pode deixar None e o script calcula CU*QT)
+PT01_CT_PFx_COL   = "CT_F"                # ex.: "Custo Total" ou "CT" (pode deixar None e o script calcula CU*QT)
 # Se não existir, coloque None (o script calcula CT = CU*QT)
 
 # O_NFCI (vendas 2b)
@@ -80,9 +80,9 @@ LLPI_EMPRESA_COL = "EMPRESA"           # usado para filtrar == "K"
 # T_Entradas (entradas do mês)
 ENTR_CODE_COL   = "Filho"              # ex.: "CODPF", "Pai"
 ENTRP_CODE_COL   = "Pai"              # ex.: "CODPF", "Pai"
-ENTR_QTY_COL    = "QtEP"                 # ex.: "QT", "Qtde"
-ENTR_CU_COL     = "CUE"                 # ex.: "CU" (se não tiver, use None)
-ENTR_CT_COL     = "CT_UE"                 # ex.: "CT" (se não tiver, use None e calcula QT*CU)
+ENTR_QTY_COL    = "Qt_E"                 # ex.: "QT", "Qtde"
+ENTR_CU_COL     = "CU_E"                 # ex.: "CU" (se não tiver, use None)
+ENTR_CT_COL     = "CT_E"                 # ex.: "CT" (se não tiver, use None e calcula QT*CU)
 # Filtragem por mês:
 ENTR_ANOMES_COL = "AnoMes"             # yymm (ex.: 2507). Se não existir, use None.
 ENTR_DATE_COL   = None                 # OU nome da data (ex.: "Emissao" ou "Ultima Entrada") se preferir filtrar por data
@@ -173,7 +173,7 @@ def load_prev_inventory_pt01(file_path: Path) -> pd.DataFrame:
 
     # <<< HARD-CODE — usa exatamente as colunas definidas no topo
     code_col = PT01_CODE_COL
-    qty_col  = PT01_QtSSx_COL
+    qty_col  = PT01_Qt_SS_COL
     cu_col   = PT01_CU_COL
     ct_col   = PT01_CT_COL
 
@@ -204,7 +204,7 @@ def load_curr_inventory_pt01(file_path: Path) -> pd.DataFrame:
 
     # <<< HARD-CODE — usa exatamente as colunas definidas no topo
     code_col = PT01_CODE_COL
-    qty_col  = PT01_QtSSx_COL
+    qty_col  = PT01_Qt_SS_COL
     cu_col   = PT01_CU_COL
     ct_col   = PT01_CT_COL
 
@@ -306,7 +306,7 @@ def load_entradas(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
     work = pd.DataFrame({"CODPF": CODPF, "QT": QT, "CT": CT})
     agg = work.groupby("CODPF", as_index=False).agg({"QT":"sum", "CT":"sum"})
     agg["CU"] = np.where(agg["QT"] != 0, agg["CT"]/agg["QT"], 0.0)
-    return agg.rename(columns={"QT":"QtEP","CU":"CUE","CT":"CT_UE"})
+    return agg.rename(columns={"QT":"Qt_E","CU":"CU_E","CT":"CT_E"})
 
 def load_cu_pai(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
     entradas_path = tables_dir / ENTRADAS_FILE
@@ -349,8 +349,8 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
       - load_inventory_pt01, load_sales_onfci, load_sales_llpi, load_entradas
       - INV_PREFIX, RESUMO_PREFIX
     Retorna DataFrame com colunas:
-      CODPF, QtIP, CUPI, CT_PI, VENDAS_2b, VENDAS_2c,
-      QtEP, CUE, CT_UE, QtSSx, CU_FINAL, CT_FINAL
+      CODPF, QT_I, CU_I, CT_I, VENDAS_2b, VENDAS_2c,
+      Qt_E, CU_E, CT_E, Qt_SS, CU_F, CT_Ger
     """
     # Mês anterior
     prev_y = year if month > 1 else year - 1
@@ -378,7 +378,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     inv_this = load_curr_inventory_pt01(this_inv_path)   # CODPF, QT, CU, CT
     vendas_b = load_sales_onfci(resumo_path)        # CODPF, VENDAS_2b
     vendas_c = load_sales_llpi(resumo_path)         # CODPF, VENDAS_2c
-    entrs    = load_entradas(tables_dir, year, month)  # CODPF, QtEP, CUE, CT_UE
+    entrs    = load_entradas(tables_dir, year, month)  # CODPF, Qt_E, CU_E, CT_E
     prodf = load_prodf(tables_dir)
 
 
@@ -392,8 +392,8 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     entrs["CODPP"] = entrs["CODPP"].fillna(entrs["CODPF"])
 
     # Renomeia inventários p/ INICIAL/FINAL
-    inv_prev = inv_prev.rename(columns={"QT": "QtIP", "CU": "CUPI", "CT": "CT_PI"})
-    inv_this = inv_this.rename(columns={"QT": "QtSSx",   "CU": "CU_FINAL",   "CT": "CT_FINAL"})
+    inv_prev = inv_prev.rename(columns={"QT": "QT_I", "CU": "CU_I", "CT": "CT_I"})
+    inv_this = inv_this.rename(columns={"QT": "Qt_SS",   "CU": "CU_F",   "CT": "CT_Ger"})
 
     # Merge universo
     # Começa pelo conjunto que sempre existe (inv_prev) e vai encostando os demais
@@ -408,10 +408,10 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
 
     # Garante tipos numéricos e preenche NaN
     num_cols = [
-        "QtIP", "CUPI", "CT_PI",
+        "QT_I", "CU_I", "CT_I",
         "VENDAS_2b", "VENDAS_2c",
-        "QtEP", "CUE", "CT_UE",
-        "QtSSx", "CU_FINAL", "CT_FINAL",
+        "Qt_E", "CU_E", "CT_E",
+        "Qt_SS", "CU_F", "CT_Ger",
         # 👇 add your new ones
         "VV_2b","VV_2c","VV_tot",
         "Mrg_2b","Mrg_2c","Mrg_tot",
@@ -422,13 +422,13 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
 
     # Recalcula CT se vier 0 com QT/CU disponíveis
-    if "CT_PI" in df.columns:
-        m = (df["CT_PI"] == 0) & ((df["QtIP"] != 0) | (df["CUPI"] != 0))
-        df.loc[m, "CT_PI"] = df.loc[m, "QtIP"] * df.loc[m, "CUPI"]
+    if "CT_I" in df.columns:
+        m = (df["CT_I"] == 0) & ((df["QT_I"] != 0) | (df["CU_I"] != 0))
+        df.loc[m, "CT_I"] = df.loc[m, "QT_I"] * df.loc[m, "CU_I"]
 
-    if "CT_FINAL" in df.columns:
-        m = (df["CT_FINAL"] == 0) & ((df["QtSSx"] != 0) | (df["CU_FINAL"] != 0))
-        df.loc[m, "CT_FINAL"] = df.loc[m, "QtSSx"] * df.loc[m, "CU_FINAL"]
+    if "CT_Ger" in df.columns:
+        m = (df["CT_Ger"] == 0) & ((df["Qt_SS"] != 0) | (df["CU_F"] != 0))
+        df.loc[m, "CT_Ger"] = df.loc[m, "Qt_SS"] * df.loc[m, "CU_F"]
 
     # Garante existência das colunas pedidas
     for c in num_cols:
@@ -438,10 +438,10 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     # Ordena colunas na saída final
     cols_base = [
         "CODPF", "CODPP",
-        "QtIP", "CUPI", "CT_PI",
+        "QT_I", "CU_I", "CT_I",
         "VENDAS_2b", "VENDAS_2c", "VENDAS_tot",   # 👈 put Vendas_Tot here
-        "QtEP", "CUE", "CT_UE",
-        "QtSSx", "QtGI","CU_FINAL", "CT_FINAL",
+        "Qt_E", "CU_E", "CT_E",
+        "Qt_SS", "QtGI","CU_F", "CT_Ger",
     ]
 
     # add new metrics here
@@ -486,12 +486,12 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     cu_pai = load_cu_pai(tables_dir, year, month)
     df = df.merge(cu_pai, on="CODPP", how="left")
 
-    df["QT_Diff"]     = df["QtSSx"] - (df["QtIP"] - df["VENDAS_2b"] - df["VENDAS_2c"] + df["QtEP"])
-    df["CU_Diff"]     = np.where(df["QtSSx"] > 0, df["CU_FINAL"] - df["CUPI"], 0)
+    df["QT_Diff"]     = df["Qt_SS"] - (df["QT_I"] - df["VENDAS_2b"] - df["VENDAS_2c"] + df["Qt_E"])
+    df["CU_Diff"]     = np.where(df["Qt_SS"] > 0, df["CU_F"] - df["CU_I"], 0)
     df["CT_Diff_QT"]  = df["QT_Diff"] * df["CU_Pai"]
     df["CT_Diff_CU"]  = np.where(
-        (df["QtIP"] > 0) & (df["QtSSx"] > 0),
-        df["QtIP"] * (df["CU_FINAL"] - df["CUPI"]),
+        (df["QT_I"] > 0) & (df["Qt_SS"] > 0),
+        df["QT_I"] * (df["CU_F"] - df["CU_I"]),
         0
     )
         # Arredondamento (2 casas decimais)
@@ -550,18 +550,31 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
     )
 
     # Recompute CU from CT/QT at parent level
-    if "QtIP" in parent_report.columns and "CT_PI" in parent_report.columns:
-        parent_report["CUPI"] = np.where(
-            parent_report["QtIP"] != 0,
-            parent_report["CT_PI"] / parent_report["QtIP"],
+    if "QT_I" in parent_report.columns and "CT_I" in parent_report.columns:
+        parent_report["CU_I"] = np.where(
+            parent_report["QT_I"] != 0,
+            parent_report["CT_I"] / parent_report["QT_I"],
             0.0,
         )
-    if "QtSSx" in parent_report.columns and "CT_FINAL" in parent_report.columns:
-        parent_report["CU_FINAL"] = np.where(
-            parent_report["QtSSx"] != 0,
-            parent_report["CT_FINAL"] / parent_report["QtSSx"],
+    if "Qt_SS" in parent_report.columns and "CT_Ger" in parent_report.columns:
+        parent_report["CU_F"] = np.where(
+            parent_report["Qt_SS"] != 0,
+            parent_report["CT_Ger"] / parent_report["Qt_SS"],
             0.0,
         )
+    # Define colunas na ordem exata da aba 'Parent' desejada
+    final_cols_order = [
+        "CODPP", "Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS", "Qt_Diff",
+        "CT_I", "CT_E", "CT_S", "CT_SE", "CT_SS", "CT_Diff",
+        "CU_I", "CU_E", "CU_S", "CU_F",
+        "VQt_2b", "VQt_2c", "VQt_tot",
+        "VV_2b", "VV_2c", "VV_tot",
+        "Mrg_2b", "Mrg_2c", "Mrg_tot",
+        "MrgPct_2b", "MrgPct_2c", "MrgPct_tot",
+        "CT_Diff_QT"
+    ]
+    # Filtra colunas existentes (caso alguma falte)
+    #parent_report = parent_report[[col for col in final_cols_order if col in parent_report.columns]]
 
     # Save CSV and XLSX
     tag = yymm_to_str(year, month)
@@ -588,9 +601,9 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
             orange_money_fmt= wb.add_format({'num_format': '#,##0.00', 'bg_color': '#FCE4D6'})   # light orange
 
             money_cols = [
-                "CUPI", "CT_PI",
-                "CUE", "CT_UE",
-                "CU_FINAL", "CT_FINAL",
+                "CU_I", "CT_I",
+                "CU_E", "CT_E",
+                "CU_F", "CT_Ger",
                 "CU_Diff", "CT_Diff_QT", "CT_Diff_CU", "CU_Pai"
             ]
             gray_cols = {"QT_Diff", "CU_Diff", "CT_Diff_QT", "CT_Diff_CU"}
