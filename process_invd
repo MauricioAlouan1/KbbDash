@@ -134,6 +134,63 @@ def process_inventory_files(year, month):
         print(f"Error processing inventory files for {year}-{month_str}: {e}")
         return None
 
+from openpyxl.styles import Font, PatternFill
+
+def create_pivot_sheet(wb, df, group_col, sheet_name, year, month):
+    number_format = '#,##0.00'
+
+    pivot_table = df.pivot_table(
+        index=group_col,
+        columns='Local',
+        values='Quantidade_Inv',
+        aggfunc='sum',
+        fill_value=0
+    )
+
+    pivot_table['QtSSx'] = pivot_table.sum(axis=1)
+    pCT_UE = df.groupby(group_col)['CT_UE'].sum()
+    pivot_table['CT_UEx'] = pCT_UE
+    pivot_table['CUEx'] = pivot_table['CT_UEx'] / pivot_table['QtSSx']
+    pivot_table['AnoMes'] = (year % 100) * 100 + month
+
+    pivot_table = pivot_table.reset_index()
+
+    # Cria aba se não existir
+    if sheet_name not in wb.sheetnames:
+        wb.create_sheet(title=sheet_name)
+    ws = wb[sheet_name]
+
+    # Headers
+    for col_idx, header in enumerate(pivot_table.columns, start=1):
+        ws.cell(row=1, column=col_idx, value=header)
+
+    # Dados
+    for r_idx, row in enumerate(pivot_table.itertuples(index=False), start=2):
+        for c_idx, value in enumerate(row, start=1):
+            ws.cell(row=r_idx, column=c_idx, value=value)
+
+    # Linha de totais
+    totals_row_idx = len(pivot_table) + 2
+    ws.cell(row=totals_row_idx, column=1, value="Grand Total").font = Font(bold=True)
+    for col_idx, col_name in enumerate(pivot_table.columns[1:], start=2):
+        total_value = pivot_table[col_name].sum()
+        cell = ws.cell(row=totals_row_idx, column=col_idx, value=total_value)
+        cell.font = Font(bold=True)
+        if col_name in ['CT_UEx', 'CUEx']:
+            cell.number_format = number_format
+
+    # Estilo especial para colunas de totais
+    gray_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+    for col_name in ['QtSSx', 'CT_UEx', 'CUEx']:
+        if col_name in pivot_table.columns:
+            col_idx = pivot_table.columns.get_loc(col_name) + 1
+            for row in range(2, totals_row_idx + 1):
+                cell = ws.cell(row=row, column=col_idx)
+                cell.font = Font(bold=True)
+                cell.fill = gray_fill
+                cell.number_format = number_format
+
+    ws.auto_filter.ref = ws.dimensions
 
 
 # Function to lookup CU values and additional columns
@@ -218,108 +275,33 @@ def process_all_months():
             output_filepath = os.path.join(base_dir, 'clean',f'{year}_{month:02d}', f'R_Estoq_fdm_{year}_{month:02d}.xlsx')
             final_df.to_excel(output_filepath, index=False, sheet_name='Data')
             print(f"Saved combined inventory data for {year}-{month:02d} to {output_filepath}")
-            format_and_add_pivot(output_filepath, final_df, year,month)
+            add_pivot_by_filho(output_filepath, final_df, year,month)
+            add_pivot_by_pai(output_filepath, final_df, year, month)
             print(f"Added Formating and Pivots for {year}-{month:02d} to {output_filepath}")
 
 # Format and add pivot tables using openpyxl
-def format_and_add_pivot(output_filepath, df, year, month):
-    # Load the workbook
+def add_pivot_by_filho(output_filepath, df, year, month):
     wb = load_workbook(output_filepath)
+
+    # Formatar a aba 'Data'
     ws = wb['Data']
-    
-    # Apply number format to specified columns
     number_format = '#,##0.00'
     columns_to_format = ['CUE', 'PGE', 'CUPI', 'CUSP', 'CUPF', 'CT_UE', 'CT_PI', 'CT_PF']
-    # Add autofilter to the pivot table
-    ws.auto_filter.ref = ws.dimensions
-
     for col in columns_to_format:
         if col in df.columns:
-            col_idx = df.columns.get_loc(col) + 1  # Adjust for Excel's 1-based indexing
-            for row in range(2, len(df) + 2):  # Start from the second row (excluding header)
+            col_idx = df.columns.get_loc(col) + 1
+            for row in range(2, len(df) + 2):
                 cell = ws.cell(row=row, column=col_idx)
                 cell.number_format = number_format
-    
-    # Create a pivot table on a new sheet
-    pivot_table = df.pivot_table(
-       index='Codigo_Inv',
-        columns='Local',
-        values='Quantidade_Inv',
-        aggfunc='sum',
-        fill_value=0
-    )
-############################################
-    # Ensure total column is correct
-    pivot_table['QtSSx'] = pivot_table.sum(axis=1)
+    ws.auto_filter.ref = ws.dimensions
 
-    # Add a total cost column
-    pCT_UE = df.groupby('Codigo_Inv')['CT_UE'].sum()
-    pivot_table['CT_UEx'] = pCT_UE
+    # Criar aba PT01 (por SKU)
+    create_pivot_sheet(wb, df, group_col='Codigo_Inv', sheet_name='PT01', year=year, month=month)
+    wb.save(output_filepath)
 
-    # Add a unit cost column
-    pivot_table['CUEx'] = pivot_table['CT_UEx'] / pivot_table['QtSSx']
-    # Add AnoMes
-    pivot_table['AnoMes'] = (year % 100) * 100 + month
-
-    # Validate totals
-    original_total_cost = df['CT_UE'].sum()
-    pivot_total_cost = pivot_table['CT_UEx'].sum()
-
-    print(f"Original Total Cost: {original_total_cost}")
-    print(f"Pivot Table Total Cost: {pivot_total_cost}")
-
-    # Check for mismatched rows
-    unmatched_rows = df[~df['Codigo_Inv'].isin(pivot_table.index)]
-    if not unmatched_rows.empty:
-        print("Unmatched rows found:")
-        print(unmatched_rows)
-    else:
-        print('### No unmatched rows ###')
-        
-############################################
-
-    # Reset the index for better readability
-    pivot_table = pivot_table.reset_index()
-
-    # Add the pivot table to a new sheet
-    pivot_sheet_name = 'PT01'
-    if pivot_sheet_name not in wb.sheetnames:
-        wb.create_sheet(title=pivot_sheet_name)
-    pivot_ws = wb[pivot_sheet_name]
-    
-    # Write headers
-    for col_idx, header in enumerate(pivot_table.columns, start=1):
-        pivot_ws.cell(row=1, column=col_idx, value=header)
-
-    # Write the pivot table data
-    for r_idx, row in enumerate(pivot_table.itertuples(index=False), start=2):
-        for c_idx, value in enumerate(row, start=1):
-            pivot_ws.cell(row=r_idx, column=c_idx, value=value)
-    
-    # Add totals row at the bottom
-    totals_row_idx = len(pivot_table) + 2
-    pivot_ws.cell(row=totals_row_idx, column=1, value="Grand Total").font = Font(bold=True)
-    for col_idx, col_name in enumerate(pivot_table.columns[1:], start=2):  # Skip 'CodPF_Prod'
-        total_value = pivot_table[col_name].sum()
-        cell = pivot_ws.cell(row=totals_row_idx, column=col_idx, value=total_value)
-        cell.font = Font(bold=True)
-        if col_name in ['CT_UEx', 'CUEx']:
-            cell.number_format = number_format
-
-    # Apply formatting to the last 3 columns (bold + light gray fill)
-    gray_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
-    for col_name in ['QtSSx', 'CT_UEx', 'CUEx']:
-        col_idx = pivot_table.columns.get_loc(col_name) + 1
-        for row in range(2, totals_row_idx + 1):  # Include totals row
-            cell = pivot_ws.cell(row=row, column=col_idx)
-            cell.font = Font(bold=True)
-            cell.fill = gray_fill
-            cell.number_format = number_format
-
-    # Add autofilter to the pivot table
-    pivot_ws.auto_filter.ref = pivot_ws.dimensions
-
-    # Save the workbook
+def add_pivot_by_pai(output_filepath, df, year, month):
+    wb = load_workbook(output_filepath)
+    create_pivot_sheet(wb, df, group_col='Pai', sheet_name='PT_pp', year=year, month=month)
     wb.save(output_filepath)
 
 
