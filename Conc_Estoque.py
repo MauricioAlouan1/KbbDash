@@ -56,7 +56,7 @@ SHEET_LLPI   = "L_LPI"
 # <<< HARD-CODE AQUI: nomes das COLUNAS por aba/tabela
 # PT01 (estoque)
 PT01_CODE_COL = "Codigo_Inv"                # ex.: "CODPF" ou "Código do Produto"
-PT01_QTY_COL  = "QtSS"                     # ex.: "QT" ou "Qt_Final" ou "ESTOQUE"
+PT01_QTY_COL  = "QtSSx"                     # ex.: "QT" ou "Qt_Final" ou "ESTOQUE"
 PT01_CU_COL   = "CUEx"                 # ex.: "Ult CU R$" ou "CU"
 PT01_CT_COL   = "CT_UEx"                # ex.: "Custo Total" ou "CT" (pode deixar None e o script calcula CU*QT)
 # Se não existir, coloque None (o script calcula CT = CU*QT)

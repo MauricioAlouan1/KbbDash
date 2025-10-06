@@ -250,14 +250,14 @@ def format_and_add_pivot(output_filepath, df, year, month):
     )
 ############################################
     # Ensure total column is correct
-    pivot_table['QtSS'] = pivot_table.sum(axis=1)
+    pivot_table['QtSSx'] = pivot_table.sum(axis=1)
 
     # Add a total cost column
     pCT_UE = df.groupby('Codigo_Inv')['CT_UE'].sum()
     pivot_table['CT_UEx'] = pCT_UE
 
     # Add a unit cost column
-    pivot_table['CUEx'] = pivot_table['CT_UEx'] / pivot_table['QtSS']
+    pivot_table['CUEx'] = pivot_table['CT_UEx'] / pivot_table['QtSSx']
     # Add AnoMes
     pivot_table['AnoMes'] = (year % 100) * 100 + month
 
@@ -308,7 +308,7 @@ def format_and_add_pivot(output_filepath, df, year, month):
 
     # Apply formatting to the last 3 columns (bold + light gray fill)
     gray_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
-    for col_name in ['QtSS', 'CT_UEx', 'CUEx']:
+    for col_name in ['QtSSx', 'CT_UEx', 'CUEx']:
         col_idx = pivot_table.columns.get_loc(col_name) + 1
         for row in range(2, totals_row_idx + 1):  # Include totals row
             cell = pivot_ws.cell(row=row, column=col_idx)
