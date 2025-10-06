@@ -155,14 +155,13 @@ def lookup_cu_values(inventory_df, cutoff_date):
         entradas_df['Ultima Entrada'] = pd.to_datetime(entradas_df['Ultima Entrada'], errors='coerce')
         entradas_df = entradas_df[entradas_df['Ultima Entrada'] <= cutoff_date]
 
-        # ➤ Último custo por Pai
         last_cu_pai = (
             entradas_df[entradas_df['Pai'].notna() & (entradas_df['Pai'] != '')]
             .sort_values(['Pai', 'Ultima Entrada'])
-            .drop_duplicates(subset='Pai', keep='last')[['Pai', 'Ult CU R$']]
-            .rename(columns={'Ult CU R$': 'UCP'})
+            .drop_duplicates(subset='Pai', keep='last')[
+                ['Pai', 'CUE', 'PGE', 'CUPI', 'CUSP', 'CUPF', 'QtIP', 'QtEP', 'QtSP']
+            ]
         )
-
 
         inventory_df['Codigo'] = inventory_df['Codigo'].astype(str)
         inventory_df.rename(columns={'Quantidade': 'Quantidade_Inv', 'Codigo': 'Codigo_Inv'}, inplace=True)
@@ -171,15 +170,16 @@ def lookup_cu_values(inventory_df, cutoff_date):
 
         inventory_df = pd.merge(inventory_df, prodf_df[['CodPF_Prod', 'CodPP_Prod']], 
                                 left_on='Codigo_Inv', right_on='CodPF_Prod', how='left')
+        inventory_df['CodPP_Prod'] = inventory_df['CodPP_Prod'].fillna(inventory_df['Codigo_Inv'])
 
         inventory_df = pd.merge(inventory_df, last_cu_pai, 
                                 left_on='CodPP_Prod', right_on='Pai', how='left')
 
         inventory_df['Quantidade_Inv'] = pd.to_numeric(inventory_df['Quantidade_Inv'], errors='coerce').fillna(0)
-        inventory_df['UCP'] = pd.to_numeric(inventory_df['UCP'], errors='coerce').fillna(0)
 
-        inventory_df['UCU'] = inventory_df['UCP']
-        inventory_df['UCT'] = inventory_df['UCU'] * inventory_df['Quantidade_Inv']
+        inventory_df['CT_UE'] = inventory_df['CUE'] * inventory_df['Quantidade_Inv']
+        inventory_df['CT_PI'] = inventory_df['CUPI'] * inventory_df['Quantidade_Inv']
+        inventory_df['CT_PF'] = inventory_df['CUPF'] * inventory_df['Quantidade_Inv']
 
         return inventory_df
 
@@ -229,7 +229,7 @@ def format_and_add_pivot(output_filepath, df, year, month):
     
     # Apply number format to specified columns
     number_format = '#,##0.00'
-    columns_to_format = ['UCP', 'UCF', 'UCU', 'UCT']
+    columns_to_format = ['CUE', 'PGE', 'CUPI', 'CUSP', 'CUPF', 'CT_UE', 'CT_PI', 'CT_PF']
     # Add autofilter to the pivot table
     ws.auto_filter.ref = ws.dimensions
 
@@ -250,20 +250,20 @@ def format_and_add_pivot(output_filepath, df, year, month):
     )
 ############################################
     # Ensure total column is correct
-    pivot_table['Total'] = pivot_table.sum(axis=1)
+    pivot_table['QtSS'] = pivot_table.sum(axis=1)
 
     # Add a total cost column
-    total_cost = df.groupby('Codigo_Inv')['UCT'].sum()
-    pivot_table['Total Cost'] = total_cost
+    pCT_UE = df.groupby('Codigo_Inv')['CT_UE'].sum()
+    pivot_table['CT_UEx'] = pCT_UE
 
     # Add a unit cost column
-    pivot_table['Unit Cost'] = pivot_table['Total Cost'] / pivot_table['Total']
+    pivot_table['CUEx'] = pivot_table['CT_UEx'] / pivot_table['QtSS']
     # Add AnoMes
     pivot_table['AnoMes'] = (year % 100) * 100 + month
 
     # Validate totals
-    original_total_cost = df['UCT'].sum()
-    pivot_total_cost = pivot_table['Total Cost'].sum()
+    original_total_cost = df['CT_UE'].sum()
+    pivot_total_cost = pivot_table['CT_UEx'].sum()
 
     print(f"Original Total Cost: {original_total_cost}")
     print(f"Pivot Table Total Cost: {pivot_total_cost}")
@@ -303,12 +303,12 @@ def format_and_add_pivot(output_filepath, df, year, month):
         total_value = pivot_table[col_name].sum()
         cell = pivot_ws.cell(row=totals_row_idx, column=col_idx, value=total_value)
         cell.font = Font(bold=True)
-        if col_name in ['Total Cost', 'Unit Cost']:
+        if col_name in ['CT_UEx', 'CUEx']:
             cell.number_format = number_format
 
     # Apply formatting to the last 3 columns (bold + light gray fill)
     gray_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
-    for col_name in ['Total', 'Total Cost', 'Unit Cost']:
+    for col_name in ['QtSS', 'CT_UEx', 'CUEx']:
         col_idx = pivot_table.columns.get_loc(col_name) + 1
         for row in range(2, totals_row_idx + 1):  # Include totals row
             cell = pivot_ws.cell(row=row, column=col_idx)
