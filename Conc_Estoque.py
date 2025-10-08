@@ -55,17 +55,6 @@ SHEET_LLPI   = "L_LPI"
 
 # <<< HARD-CODE AQUI: nomes das COLUNAS por aba/tabela
 # PT01 (estoque)
-PT01_CODE_COL = "Codigo_Inv"                # ex.: "CODPF" ou "Código do Produto"
-
-PT01_Qt_SS_COL  = "Qt_SS"                     # ex.: "QT" ou "Qt_SS" ou "ESTOQUE"
-PT01_QtGer_COL  = "Qt_Ger"                     # ex.: "QT" ou "Qt_SS" ou "ESTOQUE"
-
-PT01_CU_COL   = "CU_E"                # ex.: "Ult CU R$" ou "CU"
-PT01_CUPF_COL   = "CU_F"                 # ex.: "Ult CU R$" ou "CU"
-
-PT01_CT_COL   = "CT_E"                # ex.: "Custo Total" ou "CT" (pode deixar None e o script calcula CU*QT)
-PT01_CT_PFx_COL   = "CT_F"                # ex.: "Custo Total" ou "CT" (pode deixar None e o script calcula CU*QT)
-# Se não existir, coloque None (o script calcula CT = CU*QT)
 
 # O_NFCI (vendas 2b)
 ONFCI_CODE_COL = "CODPF"               # ex.: "CODPF" ou "Código do Produto"
@@ -168,66 +157,33 @@ def load_prodf(tables_dir: Path) -> pd.DataFrame:
     df["CODPP"] = df["CodPP"].astype(str).str.strip().str.upper()
     return df[["CODPF", "CODPP"]]
 
-def load_prev_inventory_pt01(file_path: Path) -> pd.DataFrame:
-    df = pd.read_excel(file_path, sheet_name=SHEET_PT01)
+def load_curr_inventory_data(file_path: Path) -> pd.DataFrame:
+    df = pd.read_excel(file_path, sheet_name="Data")
 
     # <<< HARD-CODE — usa exatamente as colunas definidas no topo
-    code_col = PT01_CODE_COL
-    qty_col  = PT01_Qt_SS_COL
-    cu_col   = PT01_CU_COL
-    ct_col   = PT01_CT_COL
-
-    # Normaliza tipos
-    def _num(s):
-        return pd.to_numeric(df[s], errors="coerce").fillna(0) if s else None
-
-    CODPF = df[code_col].astype(str).str.strip().str.upper()
-    QT = _num(qty_col) if qty_col else pd.Series(0, index=df.index, dtype="float")
-    CU = _num(cu_col) if cu_col else pd.Series(0.0, index=df.index, dtype="float")
-    if ct_col:
-        CT = _num(ct_col)
-    else:
-        CT = QT * CU  # calcula se não veio pronto
-
-    out = pd.DataFrame({"CODPF": CODPF, "QT": QT, "CU": CU, "CT": CT})
-    # se CT = 0 mas QT e CU existem, recomputa
-    m = (out["CT"] == 0) & ((out["QT"] != 0) | (out["CU"] != 0))
-    out.loc[m, "CT"] = out.loc[m, "QT"] * out.loc[m, "CU"]
+    code_col = "Codigo_Inv"
+    df["CODPF"] = df[code_col]
+    df["Qt_SS"] = df["Quantidade_Inv"]
 
     # Consolida por item
-    agg = out.groupby("CODPF", as_index=False).agg({"QT":"sum", "CT":"sum"})
-    agg["CU"] = np.where(agg["QT"] != 0, agg["CT"]/agg["QT"], 0.0)
-    return agg
+    agg = df.groupby(code_col, as_index=False).agg({
+        # summed values
+        "Qt_SS": "sum",
+        "CT_I": "sum",
+        "CT_E": "sum",
+        "CT_F": "sum",
 
-def load_curr_inventory_pt01(file_path: Path) -> pd.DataFrame:
-    df = pd.read_excel(file_path, sheet_name=SHEET_PT01)
+        # repeated values → use average (or 'first' if more reliable)
+        "CU_I": "mean",
+        "CU_E": "mean",
+        "CU_S": "mean",
+        "CU_F": "mean",
+        "PGE": "mean",
 
-    # <<< HARD-CODE — usa exatamente as colunas definidas no topo
-    code_col = PT01_CODE_COL
-    qty_col  = PT01_Qt_SS_COL
-    cu_col   = PT01_CU_COL
-    ct_col   = PT01_CT_COL
-
-    # Normaliza tipos
-    def _num(s):
-        return pd.to_numeric(df[s], errors="coerce").fillna(0) if s else None
-
-    CODPF = df[code_col].astype(str).str.strip().str.upper()
-    QT = _num(qty_col) if qty_col else pd.Series(0, index=df.index, dtype="float")
-    CU = _num(cu_col) if cu_col else pd.Series(0.0, index=df.index, dtype="float")
-    if ct_col:
-        CT = _num(ct_col)
-    else:
-        CT = QT * CU  # calcula se não veio pronto
-
-    out = pd.DataFrame({"CODPF": CODPF, "QT": QT, "CU": CU, "CT": CT})
-    # se CT = 0 mas QT e CU existem, recomputa
-    m = (out["CT"] == 0) & ((out["QT"] != 0) | (out["CU"] != 0))
-    out.loc[m, "CT"] = out.loc[m, "QT"] * out.loc[m, "CU"]
-
-    # Consolida por item
-    agg = out.groupby("CODPF", as_index=False).agg({"QT":"sum", "CT":"sum"})
-    agg["CU"] = np.where(agg["QT"] != 0, agg["CT"]/agg["QT"], 0.0)
+        "Qt_I": "mean",
+        "Qt_E": "mean"
+    })
+    agg = agg.rename(columns={code_col: "CODPF"})
     return agg
 
 def load_sales_onfci(resumo_path: Path) -> pd.DataFrame:
@@ -375,15 +331,17 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
 
     # Carrega dados
     #inv_prev = load_prev_inventory_pt01(prev_inv_path)   # CODPF, QT, CU, CT
-    inv_this = load_curr_inventory_pt01(this_inv_path)   # CODPF, QT, CU, CT
+    inv_this = load_curr_inventory_data(this_inv_path)   # CODPF, QT, CU, CT
+    print("📄 Columns in inventory Excel:", inv_this.columns.tolist())
+
     vendas_b = load_sales_onfci(resumo_path)        # CODPF, VENDAS_2b
     vendas_c = load_sales_llpi(resumo_path)         # CODPF, VENDAS_2c
     entrs    = load_entradas(tables_dir, year, month)  # CODPF, Qt_E, CU_E, CT_E
     prodf = load_prodf(tables_dir)
 
 
-    inv_prev = inv_prev.merge(prodf, on="CODPF", how="left")
-    inv_prev["CODPP"] = inv_prev["CODPP"].fillna(inv_prev["CODPF"])
+    #inv_prev = inv_prev.merge(prodf, on="CODPF", how="left")
+    #inv_prev["CODPP"] = inv_prev["CODPP"].fillna(inv_prev["CODPF"])
     inv_this = inv_this.merge(prodf, on="CODPF", how="left")
     inv_this["CODPP"] = inv_this["CODPP"].fillna(inv_this["CODPF"])
     vendas_b = vendas_b.merge(prodf, on="CODPF", how="left")
@@ -392,19 +350,10 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     entrs["CODPP"] = entrs["CODPP"].fillna(entrs["CODPF"])
 
     # Renomeia inventários p/ INICIAL/FINAL
-    inv_prev = inv_prev.rename(columns={"QT": "QT_I", "CU": "CU_I", "CT": "CT_I"})
-    inv_this = inv_this.rename(columns={"QT": "Qt_SS", "CU": "CU_F",   "CT": "CT_Ger"})
-
-    # Merge universo
-    # Começa pelo conjunto que sempre existe (inv_prev) e vai encostando os demais
-    df = inv_prev.copy()
-    for add in [inv_this, vendas_b, vendas_c, entrs]:
-        if add is not None and not add.empty:
-            df = pd.merge(df, add, on=["CODPF","CODPP"], how="outer")
-
-    if "CODPF" not in df.columns:
-        # Caso extremo (todas as fontes vazias): força coluna
-        df["CODPF"] = pd.Series(dtype=str)
+    #inv_prev = inv_prev.rename(columns={"QT": "QT_I", "CU": "CU_I", "CT": "CT_I"})
+    inv_this = inv_this.rename(columns={"QT": "Qt_SS", "CU": "CU_F",   "CT": "CT_GER"})
+    df = inv_this.copy()
+    df.columns = [c.upper() for c in df.columns]
 
     # Garante tipos numéricos e preenche NaN
     num_cols = [
