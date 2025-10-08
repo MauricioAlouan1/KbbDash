@@ -179,8 +179,6 @@ def load_curr_inventory_data(file_path: Path) -> pd.DataFrame:
         "CU_S": "mean",
         "CU_F": "mean",
         "PGE": "mean",
-
-        "Qt_I": "mean",
         "Qt_E": "mean"
     })
     agg = agg.rename(columns={code_col: "CODPF"})
@@ -371,10 +369,6 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
 
     # Recalcula CT se vier 0 com QT/CU disponíveis
-    if "CT_I" in df.columns:
-        m = (df["CT_I"] == 0) & ((df["QT_I"] != 0) | (df["CU_I"] != 0))
-        df.loc[m, "CT_I"] = df.loc[m, "QT_I"] * df.loc[m, "CU_I"]
-
     if "CT_Ger" in df.columns:
         m = (df["CT_Ger"] == 0) & ((df["Qt_SS"] != 0) | (df["CU_F"] != 0))
         df.loc[m, "CT_Ger"] = df.loc[m, "Qt_SS"] * df.loc[m, "CU_F"]
