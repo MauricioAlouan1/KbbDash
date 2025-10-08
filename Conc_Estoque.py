@@ -169,12 +169,10 @@ def load_curr_inventory_data(file_path: Path) -> pd.DataFrame:
     agg = df.groupby(code_col, as_index=False).agg({
         # summed values
         "Qt_SS": "sum",
-        "CT_I": "sum",
         "CT_E": "sum",
         "CT_F": "sum",
 
         # repeated values → use average (or 'first' if more reliable)
-        "CU_I": "mean",
         "CU_E": "mean",
         "CU_S": "mean",
         "CU_F": "mean",
@@ -183,6 +181,38 @@ def load_curr_inventory_data(file_path: Path) -> pd.DataFrame:
     })
     agg = agg.rename(columns={code_col: "CODPF"})
     return agg
+
+
+def load_prev_inventory_data(file_path: Path) -> pd.DataFrame:
+    print(f"🟡 Loading previous inventory from: {file_path}")
+    df = pd.read_excel(file_path, sheet_name="PT01")
+    print(f"📄 Columns found: {list(df.columns)}")
+
+    # Identify the code column
+    code_col = "Codigo_Inv"
+    if code_col not in df.columns:
+        print("❌ Column 'Codigo_Inv' not found — please check file header names.")
+    else:
+        print(f"✅ Using code column: {code_col}")
+
+    # Map your expected columns
+    for src_col, dst_col in [("Qt_Ger", "Qt_I"), ("CT_Ger", "CT_I"), ("CU_F", "CU_I")]:
+        if src_col not in df.columns:
+            print(f"⚠️ Missing expected column '{src_col}' in PT01.")
+            df[dst_col] = 0
+        else:
+            df[dst_col] = pd.to_numeric(df[src_col], errors="coerce").fillna(0)
+
+    # Copy product code
+    df["CODPF"] = df[code_col].astype(str).str.strip().str.upper()
+
+    # Keep only wanted cols
+    interest_cols = ["CODPF", "Qt_I", "CT_I", "CU_I"]
+    dfkeep = df[interest_cols].drop_duplicates("CODPF", keep="first")
+
+    print(f"✅ Preview of first 5 rows after mapping:\n{dfkeep.head()}")
+    print(f"🔢 Nonzero Qt_I count: {(dfkeep['Qt_I'] != 0).sum()}")
+    return dfkeep
 
 def load_sales_onfci(resumo_path: Path) -> pd.DataFrame:
     df = pd.read_excel(resumo_path, sheet_name=SHEET_ONFCI)
@@ -260,6 +290,8 @@ def load_entradas(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
     work = pd.DataFrame({"CODPF": CODPF, "QT": QT, "CT": CT})
     agg = work.groupby("CODPF", as_index=False).agg({"QT":"sum", "CT":"sum"})
     agg["CU"] = np.where(agg["QT"] != 0, agg["CT"]/agg["QT"], 0.0)
+    print(f"✅ load_entradas: Preview of first 5 rows after mapping:\n{agg.head()}")
+    #print(f"🔢 load_entradas: Nonzero Qt_I count: {(agg['Qt_I'] != 0).sum()}")
     return agg.rename(columns={"QT":"Qt_E","CU":"CU_E","CT":"CT_E"})
 
 def load_cu_pai(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
@@ -328,30 +360,34 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
             raise FileNotFoundError(f"Arquivo não encontrado: {p}")
 
     # Carrega dados
-    #inv_prev = load_prev_inventory_pt01(prev_inv_path)   # CODPF, QT, CU, CT
+    inv_prev = load_prev_inventory_data(prev_inv_path)   # CODPF, QT, CU, CT
     inv_this = load_curr_inventory_data(this_inv_path)   # CODPF, QT, CU, CT
-    print("📄 Columns in inventory Excel:", inv_this.columns.tolist())
-
     vendas_b = load_sales_onfci(resumo_path)        # CODPF, VENDAS_2b
     vendas_c = load_sales_llpi(resumo_path)         # CODPF, VENDAS_2c
-    entrs    = load_entradas(tables_dir, year, month)  # CODPF, Qt_E, CU_E, CT_E
+    #entrs    = load_entradas(tables_dir, year, month)  # CODPF, Qt_E, CU_E, CT_E
     prodf = load_prodf(tables_dir)
 
-
-    #inv_prev = inv_prev.merge(prodf, on="CODPF", how="left")
-    #inv_prev["CODPP"] = inv_prev["CODPP"].fillna(inv_prev["CODPF"])
+    inv_prev = inv_prev.merge(prodf, on="CODPF", how="left")
+    inv_prev["CODPP"] = inv_prev["CODPP"].fillna(inv_prev["CODPF"])
     inv_this = inv_this.merge(prodf, on="CODPF", how="left")
     inv_this["CODPP"] = inv_this["CODPP"].fillna(inv_this["CODPF"])
     vendas_b = vendas_b.merge(prodf, on="CODPF", how="left")
     vendas_c = vendas_c.merge(prodf, on="CODPF", how="left")
-    entrs = entrs.merge(prodf, on="CODPF", how="left")
-    entrs["CODPP"] = entrs["CODPP"].fillna(entrs["CODPF"])
+    #entrs = entrs.merge(prodf, on="CODPF", how="left")
+    #entrs["CODPP"] = entrs["CODPP"].fillna(entrs["CODPF"])
 
     # Renomeia inventários p/ INICIAL/FINAL
     #inv_prev = inv_prev.rename(columns={"QT": "QT_I", "CU": "CU_I", "CT": "CT_I"})
     inv_this = inv_this.rename(columns={"QT": "Qt_SS", "CU": "CU_F",   "CT": "CT_GER"})
+
+    print(f"✅ reconcile_inventory: Preview of first 5 rows inv_prev:\n{inv_prev.head()}")
+    print(f"✅ reconcile_inventory: Preview of first 5 rows inv_this:\n{inv_this.head()}")
+    print(f"✅ reconcile_inventory: Preview of first 5 rows vendas_b:\n{vendas_b.head()}")
+    print(f"✅ reconcile_inventory: Preview of first 5 rows vendas_c:\n{vendas_c.head()}")
+    #print(f"✅ reconcile_inventory: Preview of first 5 rows entrs:\n{entrs.head()}")
+    print(f"✅ reconcile_inventory: Preview of first 5 rows prodf:\n{prodf.head()}")
+
     df = inv_this.copy()
-    df.columns = [c.upper() for c in df.columns]
 
     # Garante tipos numéricos e preenche NaN
     num_cols = [
@@ -364,19 +400,6 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
         "Mrg_2b","Mrg_2c","Mrg_tot",
         "MrgPct_2b","MrgPct_2c","MrgPct_tot"
     ]
-    for c in num_cols:
-        if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
-
-    # Recalcula CT se vier 0 com QT/CU disponíveis
-    if "CT_Ger" in df.columns:
-        m = (df["CT_Ger"] == 0) & ((df["Qt_SS"] != 0) | (df["CU_F"] != 0))
-        df.loc[m, "CT_Ger"] = df.loc[m, "Qt_SS"] * df.loc[m, "CU_F"]
-
-    # Garante existência das colunas pedidas
-    for c in num_cols:
-        if c not in df.columns:
-            df[c] = 0.0
 
     # Ordena colunas na saída final
     cols_base = [
