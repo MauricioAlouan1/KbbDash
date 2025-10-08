@@ -214,7 +214,7 @@ def lookup_cu_values(inventory_df, anomes):
             entradas_df[entradas_df['Pai'].notna() & (entradas_df['Pai'] != '')]
             .sort_values(['Pai', 'AnoMes'])
             .drop_duplicates(subset='Pai', keep='last')[
-                ['Pai', 'CU_E', 'PGE', 'CU_I', 'CU_S', 'CU_F', 'Qt_I', 'Qt_E', 'Qt_S']
+                ['Pai', 'CU_E', 'PGE', 'CU_I', 'CU_S', 'CU_F', 'Qt_E']
             ]
         )
 
