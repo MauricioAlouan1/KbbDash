@@ -147,9 +147,9 @@ def create_pivot_sheet(wb, df, group_col, sheet_name, year, month):
     )
 
     pivot_table['Qt_SS'] = pivot_table.sum(axis=1)
-    pCT_E = df.groupby(group_col)['CT_E'].sum()
-    pivot_table['CT_E'] = pCT_E
-    pivot_table['CU_E'] = pivot_table['CT_E'] / pivot_table['Qt_SS']
+    pCT_F = df.groupby(group_col)['CT_F'].sum()
+    pivot_table['CT_F'] = pCT_F
+    pivot_table['CU_F'] = pivot_table['CT_F'] / pivot_table['Qt_SS']
     pivot_table['AnoMes'] = (year % 100) * 100 + month
 
     pivot_table = pivot_table.reset_index()
@@ -175,12 +175,12 @@ def create_pivot_sheet(wb, df, group_col, sheet_name, year, month):
         total_value = pivot_table[col_name].sum()
         cell = ws.cell(row=totals_row_idx, column=col_idx, value=total_value)
         cell.font = Font(bold=True)
-        if col_name in ['CT_E', 'CU_E']:
+        if col_name in ['CT_F', 'CU_F']:
             cell.number_format = number_format
 
     # Estilo especial para colunas de totais
     gray_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
-    for col_name in ['Qt_SS', 'CT_E', 'CU_E']:
+    for col_name in ['Qt_SS', 'CT_F', 'CU_F']:
         if col_name in pivot_table.columns:
             col_idx = pivot_table.columns.get_loc(col_name) + 1
             for row in range(2, totals_row_idx + 1):

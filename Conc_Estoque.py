@@ -374,7 +374,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
             raise FileNotFoundError(f"Arquivo não encontrado: {p}")
 
     # Carrega dados
-    inv_prev = load_prev_inventory_pt01(prev_inv_path)   # CODPF, QT, CU, CT
+    #inv_prev = load_prev_inventory_pt01(prev_inv_path)   # CODPF, QT, CU, CT
     inv_this = load_curr_inventory_pt01(this_inv_path)   # CODPF, QT, CU, CT
     vendas_b = load_sales_onfci(resumo_path)        # CODPF, VENDAS_2b
     vendas_c = load_sales_llpi(resumo_path)         # CODPF, VENDAS_2c
@@ -393,7 +393,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
 
     # Renomeia inventários p/ INICIAL/FINAL
     inv_prev = inv_prev.rename(columns={"QT": "QT_I", "CU": "CU_I", "CT": "CT_I"})
-    inv_this = inv_this.rename(columns={"QT": "Qt_SS",   "CU": "CU_F",   "CT": "CT_Ger"})
+    inv_this = inv_this.rename(columns={"QT": "Qt_SS", "CU": "CU_F",   "CT": "CT_Ger"})
 
     # Merge universo
     # Começa pelo conjunto que sempre existe (inv_prev) e vai encostando os demais
@@ -438,10 +438,12 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     # Ordena colunas na saída final
     cols_base = [
         "CODPF", "CODPP",
-        "QT_I", "CU_I", "CT_I",
+        "QT_I", "QT_E", "QT_S",
+        "CU_I", "CT_I",
         "VENDAS_2b", "VENDAS_2c", "VENDAS_tot",   # 👈 put Vendas_Tot here
         "Qt_E", "CU_E", "CT_E",
-        "Qt_SS", "QtGI","CU_F", "CT_Ger",
+        "Qt_SE", "Qt_SS",
+        "QtGI","CU_F", "CT_Ger",
     ]
 
     # add new metrics here
@@ -458,7 +460,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
 
     # Calculadas
     df["VENDAS_tot"]  = df["VENDAS_2b"] + df["VENDAS_2c"]
-    df["QtSP"]  = df["VENDAS_tot"]
+    df["Qt_S"]  = df["VENDAS_tot"]
 
     # New value and margin metrics
     df["VV_tot"]     = df.get("VV_2b", 0) + df.get("VV_2c", 0)
