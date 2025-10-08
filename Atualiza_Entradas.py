@@ -55,7 +55,7 @@ def build_prior_cupf_lookup(df: pd.DataFrame, target_ano_mes: int) -> pd.DataFra
 def apply_cupi_values(df: pd.DataFrame, target_ano_mes: int) -> pd.DataFrame:
     prior_cupf = build_prior_cupf_lookup(df, target_ano_mes)
     df = df.merge(prior_cupf, on="Pai", how="left")
-    df["CUPI_calc"] = df["CU_F_prior"].where(df["CU_F_prior"].notna(), df["CU_E"])
+    df["CU_I_new"] = df["CU_F_prior"].where(df["CU_F_prior"].notna(), df["CU_E"])
     return df
 
 # ─────────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ def apply_qtip_values(df: pd.DataFrame, target_ano_mes: int, base_dir: str, year
     prev_df["CodPP"] = prev_df["CodPP"].astype(str).str.strip()
 
     df = df.merge(prev_df, left_on="Pai", right_on="CodPP", how="left")
-    df["QtIP_calc"] = df["Qt_Ger"].fillna(0)
+    df["Qt_I"] = df["Qt_Ger"].fillna(0)
     return df
 
 def calculate_qtsp_from_resumo(base_dir: str, year: int, month: int) -> pd.DataFrame:
@@ -204,22 +204,22 @@ def main():
     df["Qt_S"] = aligned_qtsp_series
     written = write_column_to_excel(
         df, excel_path=file_path, out_path=out_path,
-        ano_mes=ano_mes, column_name="CU_I", values_series=df["CU_I_calc"]
+        ano_mes=ano_mes, column_name="CU_I", values_series=df["CU_I_new"]
     )
     print(f"✅ Wrote {written} CUPI values for AnoMes {ano_mes}")    
  
     written_qtip = write_column_to_excel(
-        df, excel_path=file_path, out_path=out_path,
-        ano_mes=ano_mes, column_name="QtIP", values_series=df["QtIP_calc"]
+        df, excel_path=out_path, out_path=out_path,
+        ano_mes=ano_mes, column_name="Qt_I", values_series=df["Qt_I"]
     )
-    print(f"✅ Wrote {written_qtip} QtIP values for AnoMes {ano_mes}")
+    print(f"✅ Wrote {written_qtip} Qt_I values for AnoMes {ano_mes}")
 
     # Escrever no Excel
     #print("\n📦 Debug Qt_S: valores a escrever:")
     #print(qtsp_df[["Pai", "Qt_S"]].to_string(index=False))
 
     written_qtsp = write_column_to_excel(
-        df, excel_path=file_path,
+        df, excel_path=out_path,
         out_path=out_path,
         ano_mes=ano_mes,
         column_name="Qt_S",
