@@ -194,7 +194,7 @@ def create_pivot_sheet(wb, df, group_col, sheet_name, year, month):
 
 # Function to lookup CU values and additional columns
 # Function to lookup CU values and additional columns
-def lookup_cu_values(inventory_df, cutoff_date):
+def lookup_cu_values(inventory_df, anomes):
 
     try:
         entradas_df = pd.read_excel(
@@ -208,12 +208,11 @@ def lookup_cu_values(inventory_df, cutoff_date):
         )
 
         # ➤ Converte a data da última entrada
-        entradas_df['Ultima Entrada'] = pd.to_datetime(entradas_df['Ultima Entrada'], errors='coerce')
-        entradas_df = entradas_df[entradas_df['Ultima Entrada'] <= cutoff_date]
+        entradas_df = entradas_df[entradas_df['AnoMes'] <= anomes]
 
         last_cu_pai = (
             entradas_df[entradas_df['Pai'].notna() & (entradas_df['Pai'] != '')]
-            .sort_values(['Pai', 'Ultima Entrada'])
+            .sort_values(['Pai', 'AnoMes'])
             .drop_duplicates(subset='Pai', keep='last')[
                 ['Pai', 'CU_E', 'PGE', 'CU_I', 'CU_S', 'CU_F', 'Qt_I', 'Qt_E', 'Qt_S']
             ]
@@ -262,8 +261,8 @@ def process_all_months():
                 continue
 
             # Step 2: Lookup CU values and calculate UCU and UCT
-            cutoff_date = pd.Timestamp(year=year, month=month, day=1) + pd.offsets.MonthEnd(0)
-            final_df = lookup_cu_values(inventory_df, cutoff_date)
+            anomes = (year - 2000)*100+ month
+            final_df = lookup_cu_values(inventory_df, anomes)
 
             if final_df is None:
                 continue
