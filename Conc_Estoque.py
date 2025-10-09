@@ -371,7 +371,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
 
     # Renomeia inventários p/ INICIAL/FINAL
     #inv_prev = inv_prev.rename(columns={"QT": "QT_I", "CU": "CU_I", "CT": "CT_I"})
-    inv_this = inv_this.rename(columns={"QT": "Qt_SS", "CU": "CU_F",   "CT": "CT_GER"})
+    #inv_this = inv_this.rename(columns={"QT": "Qt_SS", "CU": "CU_F",   "CT": "CT_GER"})
 
     #print(f"✅ reconcile_inventory: Preview of first 5 rows inv_prev:\n{inv_prev.head()}")
     print(f"✅ reconcile_inventory: Preview of first 5 rows inv_this:\n{inv_this.head()}")
@@ -435,7 +435,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     print(f"✅ df ProdF:\n{df.head()}")
 
     # Build parent-level aggregation
-    first_cols = ["Qt_E", "CU_Pai"]  # add any others you want 
+    first_cols = ["Qt_E", "CU_I", "CU_E", "CU_S", "CU_F", "CU_Pai"]  # add any others you want 
 
     agg_map = {}
     for col in df.columns:
@@ -512,6 +512,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     dp["CU_Diff"]     = dp["CU_Diff"].round(2)
     dp["CT_Diff_QT"]  = dp["CT_Diff_QT"].round(2)
     dp["CT_Diff_CU"]  = dp["CT_Diff_CU"].round(2)
+    dp["AnoMes"] = (year - 2000) * 100 + month
 
     # Ordena por código
     dp["CODPP"] = dp["CODPP"].astype(str).str.strip().str.upper()
@@ -526,7 +527,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
             "VV_2b", "VV_2c", "VV_tot",
             "Mrg_2b", "Mrg_2c", "Mrg_tot",
             "MrgPct_2b", "MrgPct_2c", "MrgPct_tot",
-            "CT_Diff_QT"
+            "CT_Diff_QT", "AnoMes"
         ]
     # Filtra colunas existentes (caso alguma falte)
     dp = dp[[col for col in final_cols_order if col in dp.columns]]
