@@ -330,6 +330,8 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     inv_prev["CODPP"] = inv_prev["CODPP"].fillna(inv_prev["CODPF"])
     inv_this = inv_this.merge(prodf, on="CODPF", how="left")
     inv_this["CODPP"] = inv_this["CODPP"].fillna(inv_this["CODPF"])
+    inv_this["Ins"] = np.where(inv_this["CODPF"] == inv_this["CODPP"], "I", "")
+
     vendas_b = vendas_b.merge(prodf, on="CODPF", how="left")
     vendas_c = vendas_c.merge(prodf, on="CODPF", how="left")
     #entrs = entrs.merge(prodf, on="CODPF", how="left")
@@ -375,7 +377,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
 
     # Ordena colunas na saída final
     cols_base = [
-        "CODPF", "CODPP",
+        "CODPF", "CODPP", "Ins",
         "Qt_I", "QT_E", "QT_S",
         "CU_I", "CT_I",
         "VENDAS_2b", "VENDAS_2c", "VENDAS_tot",   # 👈 put Vendas_Tot here
@@ -478,7 +480,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     dp = dp.sort_values("CODPP", kind="stable").reset_index(drop=True)
 
     final_cols_order = [
-            "CODPP",
+            "CODPP", "Ins",
             "Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS", "Qt_Diff", "Qt_Ger",
             "CT_I", "CT_E", "CT_S", "CT_SE", "CT_SS", "CT_Diff", "CT_Ger",
             "CU_I", "CU_E", "CU_S", "CU_F",
@@ -558,62 +560,81 @@ def apply_excel_formatting(ws, df, wb):
 def adjust_missing_inventory_progressive(dp):
     """
     Progressively adjusts missing/excess inventory within ±2% of CT_S total.
-    Uses Qt_Diff as the target direction and adjusts iteratively by cheapest-cost items first.
-    
-    Columns used:
-        CT_S   -> cost of goods sold (for total and 2% limit)
-        Qt_Diff -> target quantity difference (positive or negative)
-        CU_F   -> unit cost for adjustment
-        Qt_Ger / CT_Ger -> already reconciled items (these are skipped)
-    Output:
-        Adds column Qt_Aj = actual quantity adjusted this period
+    Uses Qt_Diff as target direction, prioritizes offsetting positive/negative
+    imbalances first before consuming the 2% budget.
     """
     import numpy as np
 
     # --- Step 1. Budget setup ---
     total_ct_s = dp["CT_S"].sum(skipna=True)
-    budget_limit = total_ct_s * 0.02  # 2% of goods sold
+    budget_limit = total_ct_s * 0.02
     print(f"💰 Total cost of goods sold (CT_S): {total_ct_s:,.2f}")
     print(f"🎯 Budget range: ±{budget_limit:,.2f}")
 
-    # --- Step 2. Filter pending items (not yet reconciled) ---
-    mask_pending = dp["CT_Ger"].isna() | dp["Qt_Ger"].isna()
+    # --- Step 2. Filter pending (not reconciled & not Ins = 'I') ---
+    mask_pending = (dp["CT_Ger"].isna() | dp["Qt_Ger"].isna()) & (dp["Ins"] != "I")
     pending = dp.loc[mask_pending].copy()
     pending = pending.dropna(subset=["CU_F", "Qt_Diff"])
     pending["Qt_Aj"] = 0
 
-    # Separate positive and negative differences
+    # --- Step 3. Calculate automatic offset between positive/negative ---
+    pending["CT_DiffVal"] = pending["Qt_Diff"] * pending["CU_F"]
+    ct_pos = pending.loc[pending["CT_DiffVal"] > 0, "CT_DiffVal"].sum()
+    ct_neg = pending.loc[pending["CT_DiffVal"] < 0, "CT_DiffVal"].sum()
+
+    offset_value = min(abs(ct_pos), abs(ct_neg))
+    print(f"⚖️  Natural offset (no budget impact): {offset_value:,.2f}")
+
+    # Determine proportional factor to fully offset cheapest items first
     pos = pending[pending["Qt_Diff"] > 0].sort_values(by="CU_F", ascending=True)
     neg = pending[pending["Qt_Diff"] < 0].sort_values(by="CU_F", ascending=True)
 
-    total_used = 0.0
-
-    # --- Step 3. Helper function for iterative adjustment ---
-    def apply_adjustments(subset, direction):
-        nonlocal total_used
+    # Apply neutralization up to offset_value
+    total_offset_applied = 0.0
+    for direction, subset in [(+1, pos), (-1, neg)]:
         for i, row in subset.iterrows():
             unit_cost = row["CU_F"]
             target_qty = abs(int(row["Qt_Diff"]))
             for _ in range(target_qty):
+                if total_offset_applied + unit_cost <= offset_value:
+                    pending.at[i, "Qt_Aj"] += direction
+                    total_offset_applied += unit_cost
+                else:
+                    break
+
+    # --- Step 4. Remaining imbalance uses the budget ---
+    remaining_budget = budget_limit
+    total_used = 0.0
+
+    def apply_adjustments(subset, direction):
+        nonlocal total_used
+        for i, row in subset.iterrows():
+            unit_cost = row["CU_F"]
+            target_qty = abs(int(row["Qt_Diff"])) - abs(int(row["Qt_Aj"]))  # leftover
+            for _ in range(target_qty):
                 potential_use = total_used + direction * unit_cost
-                if abs(potential_use) <= budget_limit:
+                if abs(potential_use) <= remaining_budget:
                     total_used = potential_use
                     pending.at[i, "Qt_Aj"] += direction
                 else:
-                    return  # stop immediately if budget exceeded
+                    return  # stop if over budget
 
-    # --- Step 4. Apply positive and negative adjustments ---
-    apply_adjustments(pos, direction=+1)
-    apply_adjustments(neg, direction=-1)
+    apply_adjustments(pos, +1)
+    apply_adjustments(neg, -1)
 
-    # --- Step 5. Merge back into dp ---
+    # --- Step 5. Compute costs and merge back ---
+    pending["CT_Aj"] = pending["Qt_Aj"] * pending["CU_F"]
+    pending["Qt_AjF"] = pending["Qt_Diff"] - pending["Qt_Aj"]
+    pending["CT_AjF"] = pending["Qt_AjF"] * pending["CU_F"]
+
     dp = dp.copy()
-    dp["Qt_Aj"] = 0
-    dp.loc[pending.index, "Qt_Aj"] = pending["Qt_Aj"]
+    for col in ["Qt_Aj", "CT_Aj", "Qt_AjF", "CT_AjF"]:
+        dp[col] = 0.0
+        dp.loc[pending.index, col] = pending[col]
 
-    print(f"✅ Total cost adjusted: {total_used:,.2f}")
-    print(f"🧾 Items adjusted: {(dp['Qt_Aj'] != 0).sum()} rows")
-    print(f"📊 Final budget usage: {total_used / budget_limit * 100:+.1f}% of limit")
+    #print(f"✅ Offset applied: {total_offset_applied:,.2f}")
+    #print(f"✅ Total cost adjusted under budget: {total_used:,.2f}")
+    #print(f"📊 Final budget usage: {total_used / budget_limit * 100:+.1f}% of limit")
 
     return dp
 
@@ -657,11 +678,11 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
     #)
 
     # Recompute CU from CT/QT at parent level
-    print(f"✅ parent_report:\n{parent_report.head(20)}")
+    print(f"✅ AA parent_report:\n{parent_report.head(20)}")
 
     # Define colunas na ordem exata da aba 'Parent' desejada
     final_cols_order = [
-        "CODPP", "Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS", "Qt_Diff", "Qt_Ger",
+        "CODPP", "Ins", "Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS", "Qt_Diff", "Qt_Ger",
         "CT_I", "CT_E", "CT_S", "CT_SE", "CT_SS", "CT_Diff", "CT_Ger",
         "CU_I", "CU_E", "CU_S", "CU_F",
         "VQt_2b", "VQt_2c", "VQt_tot",
