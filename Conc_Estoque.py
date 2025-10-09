@@ -156,7 +156,6 @@ def load_prodf(tables_dir: Path) -> pd.DataFrame:
     df["CODPF"] = df["CodPF"].astype(str).str.strip().str.upper()
     df["CODPP"] = df["CodPP"].astype(str).str.strip().str.upper()
     return df[["CODPF", "CODPP"]]
-
 def load_curr_inventory_data(file_path: Path) -> pd.DataFrame:
     df = pd.read_excel(file_path, sheet_name="Data")
 
@@ -169,7 +168,6 @@ def load_curr_inventory_data(file_path: Path) -> pd.DataFrame:
     agg = df.groupby(code_col, as_index=False).agg({
         # summed values
         "Qt_SS": "sum",
-        "CT_E": "sum",
         "CT_F": "sum",
 
         # repeated values → use average (or 'first' if more reliable)
@@ -181,8 +179,6 @@ def load_curr_inventory_data(file_path: Path) -> pd.DataFrame:
     })
     agg = agg.rename(columns={code_col: "CODPF"})
     return agg
-
-
 def load_prev_inventory_data(file_path: Path) -> pd.DataFrame:
     print(f"🟡 Loading previous inventory from: {file_path}")
     df = pd.read_excel(file_path, sheet_name="PT01")
@@ -233,7 +229,6 @@ def load_sales_onfci(resumo_path: Path) -> pd.DataFrame:
         "VV_2b":"sum",
         "Mrg_2b":"sum"
     })
-
 def load_sales_llpi(resumo_path: Path) -> pd.DataFrame:
     df = pd.read_excel(resumo_path, sheet_name=SHEET_LLPI)
 
@@ -257,8 +252,6 @@ def load_sales_llpi(resumo_path: Path) -> pd.DataFrame:
         "VV_2c":"sum",
         "Mrg_2c":"sum"
     })
-
-
 def load_entradas(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
     entradas_path = tables_dir / ENTRADAS_FILE
     if not entradas_path.exists():
@@ -292,7 +285,7 @@ def load_entradas(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
     agg["CU"] = np.where(agg["QT"] != 0, agg["CT"]/agg["QT"], 0.0)
     print(f"✅ load_entradas: Preview of first 5 rows after mapping:\n{agg.head()}")
     #print(f"🔢 load_entradas: Nonzero Qt_I count: {(agg['Qt_I'] != 0).sum()}")
-    return agg.rename(columns={"QT":"Qt_E","CU":"CU_E","CT":"CT_E"})
+    return agg
 
 def load_cu_pai(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
     entradas_path = tables_dir / ENTRADAS_FILE
@@ -380,12 +373,14 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     #inv_prev = inv_prev.rename(columns={"QT": "QT_I", "CU": "CU_I", "CT": "CT_I"})
     inv_this = inv_this.rename(columns={"QT": "Qt_SS", "CU": "CU_F",   "CT": "CT_GER"})
 
-    print(f"✅ reconcile_inventory: Preview of first 5 rows inv_prev:\n{inv_prev.head()}")
-    #print(f"✅ reconcile_inventory: Preview of first 5 rows inv_this:\n{inv_this.head()}")
+    #print(f"✅ reconcile_inventory: Preview of first 5 rows inv_prev:\n{inv_prev.head()}")
+    print(f"✅ reconcile_inventory: Preview of first 5 rows inv_this:\n{inv_this.head()}")
     #print(f"✅ reconcile_inventory: Preview of first 5 rows vendas_b:\n{vendas_b.head()}")
     #print(f"✅ reconcile_inventory: Preview of first 5 rows vendas_c:\n{vendas_c.head()}")
     #print(f"✅ reconcile_inventory: Preview of first 5 rows entrs:\n{entrs.head()}")
     #print(f"✅ reconcile_inventory: Preview of first 5 rows prodf:\n{prodf.head()}")
+    print("🧩 Columns at inv_this:", list(inv_this.columns))
+
 
     df = inv_this.copy()
 
@@ -402,7 +397,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
 
     # Garante tipos numéricos e preenche NaN
     num_cols = [
-        "QT_I", "CU_I", "CT_I",
+        "QT_I", "CU_I", "CT_I", "CU_S",
         "VENDAS_2b", "VENDAS_2c",
         "Qt_E", "CU_E", "CT_E",
         "Qt_SS", "CU_F", "CT_Ger",
@@ -428,76 +423,177 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
         "VV_2b","VV_2c","VV_tot",
         "Mrg_2b","Mrg_2c","Mrg_tot",
         "MrgPct_2b","MrgPct_2c","MrgPct_tot",
-        "QT_Diff","CU_Diff","CT_Diff_QT","CT_Diff_CU"
+        "QT_Diff","CU_Diff","CT_Diff_QT","CT_Diff_CU", "CU_S"
     ]
 
     # keep only what exists in df (in case of partial data)
     final_cols = [c for c in cols_base + cols_extra if c in df.columns]
     df = df[final_cols].copy()
 
-    # Calculadas
-    print(f"✅ VENDAS_2b:\n{df.head()}")
+    # Nivel de Filho
+    print("🧩 Columns in df Filho:", list(df.columns))
+    print(f"✅ df ProdF:\n{df.head()}")
 
-    df["VENDAS_tot"]  = df["VENDAS_2b"] + df["VENDAS_2c"]
-    df["Qt_S"]  = df["VENDAS_tot"]
+    # Build parent-level aggregation
+    first_cols = ["Qt_E", "CU_Pai"]  # add any others you want 
+
+    agg_map = {}
+    for col in df.columns:
+        if col in ["CODPF", "CODPP"]:
+            continue
+        elif col in first_cols:
+            agg_map[col] = "first"   # keep as is (same for all children under same parent)
+        elif pd.api.types.is_numeric_dtype(df[col]):
+            agg_map[col] = "sum"
+        else:
+            agg_map[col] = "first"
+
+    dp = (
+        df.groupby("CODPP", as_index=False)
+        .agg(agg_map)
+    )
+
+    # Nivel de Pai
+    print("🧩 Columns in dp Pai:", list(dp.columns))
+    print(f"✅ dp ProdP:\n{dp.head()}")
+
+
+    dp["VENDAS_tot"]  = dp["VENDAS_2b"] + dp["VENDAS_2c"]
+    dp["Qt_S"]  = dp["VENDAS_tot"]
 
     # New value and margin metrics
-    df["VV_tot"]     = df.get("VV_2b", 0) + df.get("VV_2c", 0)
-    df["Mrg_tot"]    = df.get("Mrg_2b", 0) + df.get("Mrg_2c", 0)
+    dp["VV_tot"]     = dp.get("VV_2b", 0) + dp.get("VV_2c", 0)
+    dp["Mrg_tot"]    = dp.get("Mrg_2b", 0) + dp.get("Mrg_2c", 0)
 
     # Percentages (protect divide by zero)
-    vv2b = df["VV_2b"] if "VV_2b" in df.columns else pd.Series(0, index=df.index)
-    mrg2b = df["Mrg_2b"] if "Mrg_2b" in df.columns else pd.Series(0, index=df.index)
+    vv2b = dp["VV_2b"] if "VV_2b" in dp.columns else pd.Series(0, index=dp.index)
+    mrg2b = dp["Mrg_2b"] if "Mrg_2b" in dp.columns else pd.Series(0, index=dp.index)
 
-    vv2c = df["VV_2c"] if "VV_2c" in df.columns else pd.Series(0, index=df.index)
-    mrg2c = df["Mrg_2c"] if "Mrg_2c" in df.columns else pd.Series(0, index=df.index)
+    vv2c = dp["VV_2c"] if "VV_2c" in dp.columns else pd.Series(0, index=dp.index)
+    mrg2c = dp["Mrg_2c"] if "Mrg_2c" in dp.columns else pd.Series(0, index=dp.index)
 
-    vvtot = df["VV_tot"] if "VV_tot" in df.columns else pd.Series(0, index=df.index)
-    mrgtot = df["Mrg_tot"] if "Mrg_tot" in df.columns else pd.Series(0, index=df.index)
+    vvtot = dp["VV_tot"] if "VV_tot" in dp.columns else pd.Series(0, index=dp.index)
+    mrgtot = dp["Mrg_tot"] if "Mrg_tot" in dp.columns else pd.Series(0, index=dp.index)
 
-    df["MrgPct_2b"]  = np.where(vv2b != 0, mrg2b / vv2b, 0)
-    df["MrgPct_2c"]  = np.where(vv2c != 0, mrg2c / vv2c, 0)
-    df["MrgPct_tot"] = np.where(vvtot != 0, mrgtot / vvtot, 0)
+    dp["MrgPct_2b"]  = np.where(vv2b != 0, mrg2b / vv2b, 0)
+    dp["MrgPct_2c"]  = np.where(vv2c != 0, mrg2c / vv2c, 0)
+    dp["MrgPct_tot"] = np.where(vvtot != 0, mrgtot / vvtot, 0)
 
     # cap at -100%
     for c in ["MrgPct_2b","MrgPct_2c","MrgPct_tot"]:
-        df[c] = df[c].apply(lambda x: max(x, -1))
+        dp[c] = dp[c].apply(lambda x: max(x, -1))
     
     # Merge CU_Pai (last known parent cost up to month)
     cu_pai = load_cu_pai(tables_dir, year, month)
-    df = df.merge(cu_pai, on="CODPP", how="left")
+    dp = dp.merge(cu_pai, on="CODPP", how="left")
 
-    print("🧩 Columns at Qt_Diff step:", list(df.columns))
-    #print(df.head(3))
+    print("🧩 Columns at Qt_Diff step:", list(dp.columns))
+    #print(dp.head(3))
 
-    df["Qt_SE"]       = df["Qt_I"] + df["Qt_E"] - df["Qt_S"]
-    df["Qt_Diff"]     = df["Qt_SS"] - df["Qt_SE"]
-    df["Qt_Ger"]      = np.where(df["Qt_Diff"] == 0, df["Qt_SS"], None)
+    dp["Qt_SE"]       = dp["Qt_I"] + dp["Qt_E"] - dp["Qt_S"]
+    dp["Qt_Diff"]     = dp["Qt_SS"] - dp["Qt_SE"]
+    dp["Qt_Ger"]      = np.where(dp["Qt_Diff"] == 0, dp["Qt_SS"], None)
+
+    dp["CT_S"]        = dp["CU_S"] * dp["Qt_S"]
+    dp["CT_E"]        = dp["CU_E"] * dp["Qt_E"]    
+    dp["CT_SE"]       = dp["CT_I"] + dp["CT_E"] - dp["CT_S"]
+    dp["CT_SS"]       = dp["Qt_SS"] * dp["CU_F"]
+    dp["CT_Diff"]     = dp["CT_SS"] - dp["CT_SE"]
+    dp["CT_Ger"]      = np.where(dp["CT_Diff"] == 0, dp["CT_SS"], None)
     
-    df["CU_Diff"]     = np.where(df["Qt_SS"] > 0, df["CU_F"] - df["CU_I"], 0)
-    df["CT_Diff_QT"]  = df["Qt_Diff"] * df["CU_Pai"]
-    df["CT_Diff_CU"]  = np.where(
-        (df["Qt_I"] > 0) & (df["Qt_SS"] > 0),
-        df["Qt_I"] * (df["CU_F"] - df["CU_I"]),
+    dp["CU_Diff"]     = np.where(dp["Qt_SS"] > 0, dp["CU_F"] - dp["CU_I"], 0)
+    dp["CT_Diff_QT"]  = dp["Qt_Diff"] * dp["CU_Pai"]
+    dp["CT_Diff_CU"]  = np.where(
+        (dp["Qt_I"] > 0) & (dp["Qt_SS"] > 0),
+        dp["Qt_I"] * (dp["CU_F"] - dp["CU_I"]),
         0
     )
         # Arredondamento (2 casas decimais)
-    df["CU_Diff"]     = df["CU_Diff"].round(2)
-    df["CT_Diff_QT"]  = df["CT_Diff_QT"].round(2)
-    df["CT_Diff_CU"]  = df["CT_Diff_CU"].round(2)
+    dp["CU_Diff"]     = dp["CU_Diff"].round(2)
+    dp["CT_Diff_QT"]  = dp["CT_Diff_QT"].round(2)
+    dp["CT_Diff_CU"]  = dp["CT_Diff_CU"].round(2)
 
     # Ordena por código
-    df["CODPF"] = df["CODPF"].astype(str).str.strip().str.upper()
-    df = df.sort_values("CODPF", kind="stable").reset_index(drop=True)
-    return df
+    dp["CODPP"] = dp["CODPP"].astype(str).str.strip().str.upper()
+    dp = dp.sort_values("CODPP", kind="stable").reset_index(drop=True)
 
-def _merge_outer(acc: pd.DataFrame, df: pd.DataFrame, tag: str) -> pd.DataFrame:
-    # Expect df has CODPF and some measures
-    if acc.empty:
-        return df.copy()
-    if "CODPF" not in acc.columns:
-        acc = pd.DataFrame({"CODPF": pd.Series(dtype=str)}).merge(acc, how="outer", on="CODPF")
-    return pd.merge(acc, df, on="CODPF", how="outer")
+    final_cols_order = [
+            "CODPP",
+            "Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS", "Qt_Diff", "Qt_Ger",
+            "CT_I", "CT_E", "CT_S", "CT_SE", "CT_SS", "CT_Diff", "CT_Ger",
+            "CU_I", "CU_E", "CU_S", "CU_F",
+            "VQt_2b", "VQt_2c", "VQt_tot",
+            "VV_2b", "VV_2c", "VV_tot",
+            "Mrg_2b", "Mrg_2c", "Mrg_tot",
+            "MrgPct_2b", "MrgPct_2c", "MrgPct_tot",
+            "CT_Diff_QT"
+        ]
+    # Filtra colunas existentes (caso alguma falte)
+    dp = dp[[col for col in final_cols_order if col in dp.columns]]
+    return dp
+
+def apply_excel_formatting(ws, df, wb):
+    """Apply column widths and styles to an Excel worksheet."""
+    col_widths = {
+        "CODPP": 10,
+        "Qt_I": 8,
+        "CT_I": 12,
+        "CU_F": 10,
+        "MrgPct_tot": 9,
+    }
+
+    # --- Define formats ---
+    qt_blue         = wb.add_format({'num_format': '#,##0', 'bg_color': '#DDEBF7'})
+    qt_gray         = wb.add_format({'num_format': '#,##0', 'bg_color': "#E3EEF7"})
+    ct_orange       = wb.add_format({'num_format': '#,##0.00', 'bg_color': "#D7A167"})
+    ct_gray         = wb.add_format({'num_format': '#,##0.00', 'bg_color': "#E3EEF7"})
+    cu_green        = wb.add_format({'num_format': '#,##0.00', 'bg_color': "#8ADBEA"})
+
+    money_fmt       = wb.add_format({'num_format': '#,##0.00'})
+    blue_money_fmt  = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#DDEBF7'})
+    green_money_fmt = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#E2EFDA'})
+    blue_pct_fmt    = wb.add_format({'num_format': '0%', 'bg_color': '#DDEBF7'})
+    orange_money_fmt= wb.add_format({'num_format': '#,##0.00', 'bg_color': '#FCE4D6'})
+
+    qt_blue_cols = {"Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS"}
+    qt_gray_cols = {"Qt_Diff", "Qt_Ger"}
+    ct_orange_cols = {"CT_I", "CT_E", "CT_S", "CT_SE", "CT_SS"}
+    ct_gray_cols = {"CT_Diff", "CT_Ger"}
+    cu_green_cols = {"CU_I", "CU_E", "CU_S", "CU_F"}
+
+    money_cols = {"CU_I", "CT_I", "CU_E", "CT_E", "CU_F", "CT_Ger"}
+    gray_cols  = {"QT_Diff", "CU_Diff", "CT_Diff_QT", "CT_Diff_CU"}
+    blue_cols  = {"VV_2b", "VV_2c", "VV_tot"}
+    green_cols = {"Mrg_2b", "Mrg_2c", "Mrg_tot"}
+    pct_cols   = {"MrgPct_2b", "MrgPct_2c", "MrgPct_tot"}
+    orange_cols= {"VENDAS_2b", "VENDAS_2c", "Vendas_Tot"}
+
+    # --- Apply formatting ---
+    ws.autofilter(0, 0, df.shape[0], df.shape[1] - 1)
+    for idx, col in enumerate(df.columns):
+        width = 12
+        if col in qt_gray_cols:
+            fmt = qt_gray
+        elif col in qt_blue_cols:
+            fmt = qt_blue
+        elif col in ct_orange_cols:
+            fmt = ct_orange
+        elif col in ct_gray_cols:
+            fmt = ct_gray
+        elif col in cu_green_cols:
+            fmt = cu_green
+        elif col in blue_cols:
+            fmt = blue_money_fmt
+        elif col in green_cols:
+            fmt = green_money_fmt
+        elif col in pct_cols:
+            fmt = blue_pct_fmt
+        elif col in orange_cols:
+            fmt = orange_money_fmt
+        else:
+            fmt = None
+        width = col_widths.get(col, 12)  # default 12 if not listed
+        ws.set_column(idx, idx, width, fmt)
 
 # -----------------------
 # CLI / Runner
@@ -519,22 +615,24 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
     prodf = load_prodf(tables_dir)
 
     # Build parent-level aggregation
+    first_cols = ["Qt_E", "CU_Pai"]  # add any others you want
 
     agg_map = {}
     for col in report.columns:
         if col in ["CODPF", "CODPP"]:
             continue
-        elif col == "CU_Pai":
+        elif col in first_cols:
             agg_map[col] = "first"   # keep as is (same for all children under same parent)
         elif pd.api.types.is_numeric_dtype(report[col]):
             agg_map[col] = "sum"
         else:
             agg_map[col] = "first"
 
-    parent_report = (
-        report.groupby("CODPP", as_index=False)
-        .agg(agg_map)
-    )
+    parent_report = report
+    #parent_report = (
+    #    report.groupby("CODPP", as_index=False)
+    #    .agg(agg_map)
+    #)
 
     # Recompute CU from CT/QT at parent level
     if "QT_I" in parent_report.columns and "CT_I" in parent_report.columns:
@@ -570,51 +668,10 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
     if save_excel:
         with pd.ExcelWriter(xlsx_path, engine="xlsxwriter") as writer:
             # --- Child sheet ---
-            report.to_excel(writer, index=False, sheet_name="Child")
+            report.to_excel(writer, index=False, sheet_name="Conc")
             wb = writer.book
-            ws_child = writer.sheets["Child"]
-
-            # --- Parent sheet ---
-            parent_report.to_excel(writer, index=False, sheet_name="Parent")
-            ws_parent = writer.sheets["Parent"]
-
-            # Define formats
-            money_fmt       = wb.add_format({'num_format': '#,##0.00'})
-            light_gray_fmt  = wb.add_format({'bg_color': '#F2F2F2'})
-            money_gray_fmt  = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#F2F2F2'})
-            blue_money_fmt  = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#DDEBF7'})   # light blue
-            green_money_fmt = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#E2EFDA'})   # light green
-            blue_pct_fmt    = wb.add_format({'num_format': '0%',       'bg_color': '#DDEBF7'})   # blue % format
-            orange_money_fmt= wb.add_format({'num_format': '#,##0.00', 'bg_color': '#FCE4D6'})   # light orange
-
-            money_cols = [
-                "CU_I", "CT_I",
-                "CU_E", "CT_E",
-                "CU_F", "CT_Ger",
-                "CU_Diff", "CT_Diff_QT", "CT_Diff_CU", "CU_Pai"
-            ]
-            gray_cols = {"QT_Diff", "CU_Diff", "CT_Diff_QT", "CT_Diff_CU"}
-
-            # Apply formatting to both sheets
-            for ws, df in [(ws_child, report), (ws_parent, parent_report)]:
-                ws.autofilter(0, 0, df.shape[0], df.shape[1] - 1)
-                for idx, col in enumerate(df.columns):
-                    width = max(12, min(32, df[col].astype(str).str.len().max() if not df.empty else 12))
-                    if col in gray_cols:
-                        fmt = light_gray_fmt
-                    elif col in money_cols:
-                        fmt = money_fmt
-                    elif col in {"VV_2b","VV_2c","VV_tot"}:
-                        fmt = blue_money_fmt
-                    elif col in {"Mrg_2b","Mrg_2c","Mrg_tot"}:
-                        fmt = green_money_fmt
-                    elif col in {"MrgPct_2b","MrgPct_2c","MrgPct_tot"}:
-                        fmt = blue_pct_fmt
-                    elif col in {"VENDAS_2b","VENDAS_2c","Vendas_Tot"}:
-                        fmt = orange_money_fmt
-                    else:
-                        fmt = None
-                    ws.set_column(idx, idx, width, fmt)
+            ws_child = writer.sheets["Conc"]
+            apply_excel_formatting(ws_child, report, wb)
 
     print(f"Saved: {xlsx_path}")
     return xlsx_path
