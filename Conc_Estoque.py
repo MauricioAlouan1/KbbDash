@@ -381,13 +381,24 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     inv_this = inv_this.rename(columns={"QT": "Qt_SS", "CU": "CU_F",   "CT": "CT_GER"})
 
     print(f"✅ reconcile_inventory: Preview of first 5 rows inv_prev:\n{inv_prev.head()}")
-    print(f"✅ reconcile_inventory: Preview of first 5 rows inv_this:\n{inv_this.head()}")
-    print(f"✅ reconcile_inventory: Preview of first 5 rows vendas_b:\n{vendas_b.head()}")
-    print(f"✅ reconcile_inventory: Preview of first 5 rows vendas_c:\n{vendas_c.head()}")
+    #print(f"✅ reconcile_inventory: Preview of first 5 rows inv_this:\n{inv_this.head()}")
+    #print(f"✅ reconcile_inventory: Preview of first 5 rows vendas_b:\n{vendas_b.head()}")
+    #print(f"✅ reconcile_inventory: Preview of first 5 rows vendas_c:\n{vendas_c.head()}")
     #print(f"✅ reconcile_inventory: Preview of first 5 rows entrs:\n{entrs.head()}")
-    print(f"✅ reconcile_inventory: Preview of first 5 rows prodf:\n{prodf.head()}")
+    #print(f"✅ reconcile_inventory: Preview of first 5 rows prodf:\n{prodf.head()}")
 
     df = inv_this.copy()
+
+    # Merge sales data into current inventory frame
+    df = df.merge(vendas_b[["CODPF", "VENDAS_2b", "VV_2b", "Mrg_2b"]], on="CODPF", how="left")
+    df = df.merge(vendas_c[["CODPF", "VENDAS_2c", "VV_2c", "Mrg_2c"]], on="CODPF", how="left")
+    # Merge previous inventory columns (Qt_I, CT_I, CU_I)
+    df = df.merge(inv_prev[["CODPF", "Qt_I", "CT_I", "CU_I"]], on="CODPF", how="left")
+
+    # Fill NaNs
+    for c in ["VENDAS_2b", "VENDAS_2c", "VV_2b", "VV_2c", "Mrg_2b", "Mrg_2c", "Qt_I", "CT_I", "CU_I"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+
 
     # Garante tipos numéricos e preenche NaN
     num_cols = [
@@ -404,7 +415,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     # Ordena colunas na saída final
     cols_base = [
         "CODPF", "CODPP",
-        "QT_I", "QT_E", "QT_S",
+        "Qt_I", "QT_E", "QT_S",
         "CU_I", "CT_I",
         "VENDAS_2b", "VENDAS_2c", "VENDAS_tot",   # 👈 put Vendas_Tot here
         "Qt_E", "CU_E", "CT_E",
@@ -425,6 +436,8 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     df = df[final_cols].copy()
 
     # Calculadas
+    print(f"✅ VENDAS_2b:\n{df.head()}")
+
     df["VENDAS_tot"]  = df["VENDAS_2b"] + df["VENDAS_2c"]
     df["Qt_S"]  = df["VENDAS_tot"]
 
@@ -454,12 +467,18 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     cu_pai = load_cu_pai(tables_dir, year, month)
     df = df.merge(cu_pai, on="CODPP", how="left")
 
-    df["QT_Diff"]     = df["Qt_SS"] - (df["QT_I"] - df["VENDAS_2b"] - df["VENDAS_2c"] + df["Qt_E"])
+    print("🧩 Columns at Qt_Diff step:", list(df.columns))
+    #print(df.head(3))
+
+    df["Qt_SE"]       = df["Qt_I"] + df["Qt_E"] - df["Qt_S"]
+    df["Qt_Diff"]     = df["Qt_SS"] - df["Qt_SE"]
+    df["Qt_Ger"]      = np.where(df["Qt_Diff"] == 0, df["Qt_SS"], None)
+    
     df["CU_Diff"]     = np.where(df["Qt_SS"] > 0, df["CU_F"] - df["CU_I"], 0)
-    df["CT_Diff_QT"]  = df["QT_Diff"] * df["CU_Pai"]
+    df["CT_Diff_QT"]  = df["Qt_Diff"] * df["CU_Pai"]
     df["CT_Diff_CU"]  = np.where(
-        (df["QT_I"] > 0) & (df["Qt_SS"] > 0),
-        df["QT_I"] * (df["CU_F"] - df["CU_I"]),
+        (df["Qt_I"] > 0) & (df["Qt_SS"] > 0),
+        df["Qt_I"] * (df["CU_F"] - df["CU_I"]),
         0
     )
         # Arredondamento (2 casas decimais)
@@ -532,8 +551,8 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
         )
     # Define colunas na ordem exata da aba 'Parent' desejada
     final_cols_order = [
-        "CODPP", "Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS", "Qt_Diff",
-        "CT_I", "CT_E", "CT_S", "CT_SE", "CT_SS", "CT_Diff",
+        "CODPP", "Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS", "Qt_Diff", "Qt_Ger",
+        "CT_I", "CT_E", "CT_S", "CT_SE", "CT_SS", "CT_Diff", "CT_Ger",
         "CU_I", "CU_E", "CU_S", "CU_F",
         "VQt_2b", "VQt_2c", "VQt_tot",
         "VV_2b", "VV_2c", "VV_tot",
@@ -542,7 +561,7 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
         "CT_Diff_QT"
     ]
     # Filtra colunas existentes (caso alguma falte)
-    #parent_report = parent_report[[col for col in final_cols_order if col in parent_report.columns]]
+    parent_report = parent_report[[col for col in final_cols_order if col in parent_report.columns]]
 
     # Save CSV and XLSX
     tag = yymm_to_str(year, month)
