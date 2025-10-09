@@ -252,40 +252,6 @@ def load_sales_llpi(resumo_path: Path) -> pd.DataFrame:
         "VV_2c":"sum",
         "Mrg_2c":"sum"
     })
-def load_entradas(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
-    entradas_path = tables_dir / ENTRADAS_FILE
-    if not entradas_path.exists():
-        raise FileNotFoundError(f"Arquivo de entradas não encontrado: {entradas_path}")
-
-    df = pd.read_excel(entradas_path)
-
-    # Filtragem por mês
-    if ENTR_ANOMES_COL:
-        target = int(f"{year%100:02d}{month:02d}")  # yymm
-        df = df[pd.to_numeric(df[ENTR_ANOMES_COL], errors="coerce") == target]
-    elif ENTR_DATE_COL:
-        parsed = pd.to_datetime(df[ENTR_DATE_COL], errors="coerce", dayfirst=True, infer_datetime_format=True)
-        df = df[(parsed.dt.year == year) & (parsed.dt.month == month)]
-    # senão, não filtra (usa tudo)
-
-    CODPF = df[ENTR_CODE_COL].astype(str).str.strip().str.upper()
-    QT    = pd.to_numeric(df[ENTR_QTY_COL], errors="coerce").fillna(0)
-
-    if ENTR_CT_COL:
-        CT = pd.to_numeric(df[ENTR_CT_COL], errors="coerce").fillna(0)
-    else:
-        if ENTR_CU_COL:
-            CU_src = pd.to_numeric(df[ENTR_CU_COL], errors="coerce").fillna(0)
-            CT = QT * CU_src
-        else:
-            CT = pd.Series(0.0, index=df.index, dtype="float")
-
-    work = pd.DataFrame({"CODPF": CODPF, "QT": QT, "CT": CT})
-    agg = work.groupby("CODPF", as_index=False).agg({"QT":"sum", "CT":"sum"})
-    agg["CU"] = np.where(agg["QT"] != 0, agg["CT"]/agg["QT"], 0.0)
-    print(f"✅ load_entradas: Preview of first 5 rows after mapping:\n{agg.head()}")
-    #print(f"🔢 load_entradas: Nonzero Qt_I count: {(agg['Qt_I'] != 0).sum()}")
-    return agg
 
 def load_cu_pai(tables_dir: Path, year: int, month: int) -> pd.DataFrame:
     entradas_path = tables_dir / ENTRADAS_FILE
@@ -454,8 +420,9 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     )
 
     # Nivel de Pai
+    pd.set_option('display.max_columns', None)
     print("🧩 Columns in dp Pai:", list(dp.columns))
-    print(f"✅ dp ProdP:\n{dp.head()}")
+    print(f"✅ dp ProdP:\n{dp.head(20)}")
 
 
     dp["VENDAS_tot"]  = dp["VENDAS_2b"] + dp["VENDAS_2c"]
@@ -484,8 +451,8 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
         dp[c] = dp[c].apply(lambda x: max(x, -1))
     
     # Merge CU_Pai (last known parent cost up to month)
-    cu_pai = load_cu_pai(tables_dir, year, month)
-    dp = dp.merge(cu_pai, on="CODPP", how="left")
+    #cu_pai = load_cu_pai(tables_dir, year, month)
+    #dp = dp.merge(cu_pai, on="CODPP", how="left")
 
     print("🧩 Columns at Qt_Diff step:", list(dp.columns))
     #print(dp.head(3))
@@ -494,24 +461,16 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     dp["Qt_Diff"]     = dp["Qt_SS"] - dp["Qt_SE"]
     dp["Qt_Ger"]      = np.where(dp["Qt_Diff"] == 0, dp["Qt_SS"], None)
 
-    dp["CT_S"]        = dp["CU_S"] * dp["Qt_S"]
-    dp["CT_E"]        = dp["CU_E"] * dp["Qt_E"]    
-    dp["CT_SE"]       = dp["CT_I"] + dp["CT_E"] - dp["CT_S"]
-    dp["CT_SS"]       = dp["Qt_SS"] * dp["CU_F"]
-    dp["CT_Diff"]     = dp["CT_SS"] - dp["CT_SE"]
-    dp["CT_Ger"]      = np.where(dp["CT_Diff"] == 0, dp["CT_SS"], None)
+    dp["CT_S"]        = (dp["CU_S"] * dp["Qt_S"]).round(2)
+    dp["CT_E"]        = (dp["CU_E"] * dp["Qt_E"]).round(2)
+    dp["CT_SE"]       = (dp["CT_I"] + dp["CT_E"] - dp["CT_S"]).round(2)
+    dp["CT_SS"]       = (dp["Qt_SS"] * dp["CU_F"]).round(2)
+    dp["CT_Diff"]     = (dp["CT_SS"] - dp["CT_SE"]).round(2)
+    dp["CT_Ger"]      = np.where(dp["Qt_Diff"] == 0, dp["CT_SS"], None)
     
     dp["CU_Diff"]     = np.where(dp["Qt_SS"] > 0, dp["CU_F"] - dp["CU_I"], 0)
-    dp["CT_Diff_QT"]  = dp["Qt_Diff"] * dp["CU_Pai"]
-    dp["CT_Diff_CU"]  = np.where(
-        (dp["Qt_I"] > 0) & (dp["Qt_SS"] > 0),
-        dp["Qt_I"] * (dp["CU_F"] - dp["CU_I"]),
-        0
-    )
-        # Arredondamento (2 casas decimais)
+    # Arredondamento (2 casas decimais)
     dp["CU_Diff"]     = dp["CU_Diff"].round(2)
-    dp["CT_Diff_QT"]  = dp["CT_Diff_QT"].round(2)
-    dp["CT_Diff_CU"]  = dp["CT_Diff_CU"].round(2)
     dp["AnoMes"] = (year - 2000) * 100 + month
 
     # Ordena por código
@@ -596,6 +555,68 @@ def apply_excel_formatting(ws, df, wb):
         width = col_widths.get(col, 12)  # default 12 if not listed
         ws.set_column(idx, idx, width, fmt)
 
+def adjust_missing_inventory_progressive(dp):
+    """
+    Progressively adjusts missing/excess inventory within ±2% of CT_S total.
+    Uses Qt_Diff as the target direction and adjusts iteratively by cheapest-cost items first.
+    
+    Columns used:
+        CT_S   -> cost of goods sold (for total and 2% limit)
+        Qt_Diff -> target quantity difference (positive or negative)
+        CU_F   -> unit cost for adjustment
+        Qt_Ger / CT_Ger -> already reconciled items (these are skipped)
+    Output:
+        Adds column Qt_Aj = actual quantity adjusted this period
+    """
+    import numpy as np
+
+    # --- Step 1. Budget setup ---
+    total_ct_s = dp["CT_S"].sum(skipna=True)
+    budget_limit = total_ct_s * 0.02  # 2% of goods sold
+    print(f"💰 Total cost of goods sold (CT_S): {total_ct_s:,.2f}")
+    print(f"🎯 Budget range: ±{budget_limit:,.2f}")
+
+    # --- Step 2. Filter pending items (not yet reconciled) ---
+    mask_pending = dp["CT_Ger"].isna() | dp["Qt_Ger"].isna()
+    pending = dp.loc[mask_pending].copy()
+    pending = pending.dropna(subset=["CU_F", "Qt_Diff"])
+    pending["Qt_Aj"] = 0
+
+    # Separate positive and negative differences
+    pos = pending[pending["Qt_Diff"] > 0].sort_values(by="CU_F", ascending=True)
+    neg = pending[pending["Qt_Diff"] < 0].sort_values(by="CU_F", ascending=True)
+
+    total_used = 0.0
+
+    # --- Step 3. Helper function for iterative adjustment ---
+    def apply_adjustments(subset, direction):
+        nonlocal total_used
+        for i, row in subset.iterrows():
+            unit_cost = row["CU_F"]
+            target_qty = abs(int(row["Qt_Diff"]))
+            for _ in range(target_qty):
+                potential_use = total_used + direction * unit_cost
+                if abs(potential_use) <= budget_limit:
+                    total_used = potential_use
+                    pending.at[i, "Qt_Aj"] += direction
+                else:
+                    return  # stop immediately if budget exceeded
+
+    # --- Step 4. Apply positive and negative adjustments ---
+    apply_adjustments(pos, direction=+1)
+    apply_adjustments(neg, direction=-1)
+
+    # --- Step 5. Merge back into dp ---
+    dp = dp.copy()
+    dp["Qt_Aj"] = 0
+    dp.loc[pending.index, "Qt_Aj"] = pending["Qt_Aj"]
+
+    print(f"✅ Total cost adjusted: {total_used:,.2f}")
+    print(f"🧾 Items adjusted: {(dp['Qt_Aj'] != 0).sum()} rows")
+    print(f"📊 Final budget usage: {total_used / budget_limit * 100:+.1f}% of limit")
+
+    return dp
+
 # -----------------------
 # CLI / Runner
 # -----------------------
@@ -616,11 +637,11 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
     prodf = load_prodf(tables_dir)
 
     # Build parent-level aggregation
-    first_cols = ["Qt_E", "CU_Pai"]  # add any others you want
+    first_cols = ["Qt_E", "CU_F", "CU_Pai"]  # add any others you want
 
     agg_map = {}
     for col in report.columns:
-        if col in ["CODPF", "CODPP"]:
+        if col in ["CODPF","CU_F", "CODPP"]:
             continue
         elif col in first_cols:
             agg_map[col] = "first"   # keep as is (same for all children under same parent)
@@ -636,18 +657,8 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
     #)
 
     # Recompute CU from CT/QT at parent level
-    if "QT_I" in parent_report.columns and "CT_I" in parent_report.columns:
-        parent_report["CU_I"] = np.where(
-            parent_report["QT_I"] != 0,
-            parent_report["CT_I"] / parent_report["QT_I"],
-            0.0,
-        )
-    if "Qt_SS" in parent_report.columns and "CT_Ger" in parent_report.columns:
-        parent_report["CU_F"] = np.where(
-            parent_report["Qt_SS"] != 0,
-            parent_report["CT_Ger"] / parent_report["Qt_SS"],
-            0.0,
-        )
+    print(f"✅ parent_report:\n{parent_report.head(20)}")
+
     # Define colunas na ordem exata da aba 'Parent' desejada
     final_cols_order = [
         "CODPP", "Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS", "Qt_Diff", "Qt_Ger",
@@ -661,6 +672,8 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
     ]
     # Filtra colunas existentes (caso alguma falte)
     parent_report = parent_report[[col for col in final_cols_order if col in parent_report.columns]]
+    parent_report = adjust_missing_inventory_progressive(parent_report)
+    print(f"✅ parent_report after Aj:\n{parent_report.head(20)}")
 
     # Save CSV and XLSX
     tag = yymm_to_str(year, month)
@@ -668,8 +681,7 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
 
     if save_excel:
         with pd.ExcelWriter(xlsx_path, engine="xlsxwriter") as writer:
-            # --- Child sheet ---
-            report.to_excel(writer, index=False, sheet_name="Conc")
+            parent_report.to_excel(writer, index=False, sheet_name="Conc")
             wb = writer.book
             ws_child = writer.sheets["Conc"]
             apply_excel_formatting(ws_child, report, wb)
