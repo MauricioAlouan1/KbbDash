@@ -21,6 +21,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from typing import List, Optional, Tuple
+from itertools import cycle
 
 # -----------------------
 # CONFIG – adjust these!
@@ -183,7 +184,6 @@ def load_curr_inventory_data(file_path: Path) -> pd.DataFrame:
 def load_prev_inventory_data(file_path: Path) -> pd.DataFrame:
     print(f"🟡 Loading previous inventory from: {file_path}")
     df = pd.read_excel(file_path, sheet_name="PT_pp")
-    print(f"📄 Columns found: {list(df.columns)}")
 
     # Identify the code column
     code_col = "Pai"
@@ -207,10 +207,6 @@ def load_prev_inventory_data(file_path: Path) -> pd.DataFrame:
     interest_cols = ["CODPP", "Qt_I", "CT_I", "CU_I"]
     dfkeep = df[interest_cols].drop_duplicates("CODPP", keep="first")
 
-    print(f"✅ Preview of first 5 rows after mapping:\n{dfkeep.head()}")
-    print(f"🔢 Nonzero Qt_I count: {(dfkeep['Qt_I'] != 0).sum()}")
-    print("🔍 Debug for CODPP = 11200 - dfkeep")
-    print(dfkeep.loc[df["CODPP"] == "11200"])
     return dfkeep
 
 def load_sales_onfci(resumo_path: Path) -> pd.DataFrame:
@@ -233,9 +229,6 @@ def load_sales_onfci(resumo_path: Path) -> pd.DataFrame:
         "VV_2b":"sum",
         "Mrg_2b":"sum"
     })
-    print("🔍 Debug for CODPP = 11200 - onfci_out")
-    print(onfci_out.loc[onfci_out["CODPP"] == "11200"].head())
-    print(f"✅ Preview of first 5 rows after mapping:\n{onfci_out.head()}")
 
     return onfci_out
 
@@ -262,8 +255,6 @@ def load_sales_llpi(resumo_path: Path) -> pd.DataFrame:
         "VV_2c":"sum",
         "Mrg_2c":"sum"
     })
-    print("🔍 Debug for CODPP = 11200 - lpi_out")
-    print(lpi_out.loc[lpi_out["CODPP"] == "11200"])
 
     return lpi_out
 
@@ -315,9 +306,10 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
         if "CODPF" in df_.columns:
             df_["CODPF"] = norm_code(df_["CODPF"])
 
-    # --- identify product parts (parent == child) and flag ---
-    prodf_ins = prodf.loc[prodf["CODPP"] == prodf["CODPF"], ["CODPP"]].drop_duplicates()
-    inv_this["Ins"] = np.where(inv_this["CODPP"].isin(prodf_ins["CODPP"]), "I", None)
+    # --- Identify codes that appear in the structure table (product parts) ---
+    prodf_parts = prodf["CODPP"].drop_duplicates()
+    # --- Flag items NOT present in prodf as 'I' (independent / not a part) ---
+    inv_this["Ins"] = np.where(~inv_this["CODPP"].isin(prodf_parts), "I", None)
 
     # ⚠️ CRITICAL: avoid many-to-many merges.
     # Do NOT merge prodf into vendas_* or inv_prev. Keep sales aggregated by CODPP only.
@@ -347,10 +339,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
 
-    # quick debug: ensure no explosion on a specific code
-    print("🔎 rows in df for CODPP=11200:", df.loc[df["CODPP"] == "11200"].shape[0])
 
-    # --- parent-level aggregation (actually by CODPP) ---
     # since df should already be 1 row per CODPP, this .groupby is defensive
     agg_map = {}
     for col in df.columns:
@@ -432,75 +421,82 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     dp = dp[[c for c in final_cols_order if c in dp.columns]]
     return dp
 
-
 def apply_excel_formatting(ws, df, wb):
     """Apply column widths and styles to an Excel worksheet."""
     col_widths = {
         "CODPP": 10,
-        "Qt_I": 5,
-        "Qt_E": 5,
-        "Qt_S":	5,
-        "Qt_SE": 5,
-        "Qt_SS": 5,
-        "Qt_Diff": 5,
-        "Qt_Ger": 5,
-        "CT_I": 12,
-        "CU_F": 5,
-        "MrgPct_tot": 4,
+        "Ins": 2,
+
+        # Quantities
+        "Qt_I": 6, "Qt_E": 5, "Qt_S": 5, "Qt_SE": 6, "Qt_SS": 6,
+        "Qt_Diff": 5, "Qt_Ger": 6,
+
+        # Adjustments
+        "Qt_Aj": 5, "Qt_AjF": 5, "CT_Aj": 9, "CT_AjF": 9,
+
+        # Costs
+        "CT_I": 10, "CT_E": 10, "CT_S": 10, "CT_SE": 10,
+        "CT_SS": 10, "CT_Diff": 10, "CT_Ger": 10,
+
+        # Unit costs
+        "CU_I": 6, "CU_E": 6, "CU_S": 6, "CU_F": 6,
+
+        # Sales and margins
+        "VV_2b": 10, "VV_2c": 10, "VV_tot": 10,
+        "Mrg_2b": 10, "Mrg_2c": 10, "Mrg_tot": 10,
+        "MrgPct_2b": 6, "MrgPct_2c": 6, "MrgPct_tot": 6,
+
+        # Vendas
+        "VENDAS_2b": 9, "VENDAS_2c": 9, "VENDAS_tot": 9,
     }
 
-    # --- Define formats ---
-    qt_blue         = wb.add_format({'num_format': '#,##0', 'bg_color': '#DDEBF7'})
-    qt_gray         = wb.add_format({'num_format': '#,##0', 'bg_color': "#E3EEF7"})
-    ct_orange       = wb.add_format({'num_format': '#,##0.00', 'bg_color': "#D7A167"})
-    ct_gray         = wb.add_format({'num_format': '#,##0.00', 'bg_color': "#E3EEF7"})
-    cu_green        = wb.add_format({'num_format': '#,##0.00', 'bg_color': "#8ADBEA"})
+    # --- Base formats ---
+    qt_blue   = wb.add_format({'num_format': '#,##0',   'bg_color': '#DDEBF7'})
+    qt_gray   = wb.add_format({'num_format': '#,##0',   'bg_color': "#E3EEF7"})
+    ct_orange = wb.add_format({'num_format': '#,##0.00','bg_color': "#D7A167"})
+    ct_gray   = wb.add_format({'num_format': '#,##0.00','bg_color': "#E3EEF7"})
+    cu_green  = wb.add_format({'num_format': '#,##0.00','bg_color': "#8ADBEA"})
 
-    money_fmt       = wb.add_format({'num_format': '#,##0.00'})
-    blue_money_fmt  = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#DDEBF7'})
-    green_money_fmt = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#E2EFDA'})
-    blue_pct_fmt    = wb.add_format({'num_format': '0%', 'bg_color': '#DDEBF7'})
-    orange_money_fmt= wb.add_format({'num_format': '#,##0.00', 'bg_color': '#FCE4D6'})
+    # --- Additional formats ---
+    blue_money_fmt   = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#DDEBF7'})
+    green_money_fmt  = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#E2EFDA'})
+    blue_pct_fmt = wb.add_format({'num_format': '0%', 'bg_color': '#DDEBF7'})
+    orange_money_fmt = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#FCE4D6'})
+    lightblue_int_fmt = wb.add_format({'num_format': '#,##0', 'bg_color': '#BDD7EE'})  # for Qt_Aj / Qt_AjF
+    lightblue_money   = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#BDD7EE'})  # for CT_Aj / CT_AjF
 
-    qt_blue_cols = {"Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS"}
-    qt_gray_cols = {"Qt_Diff", "Qt_Ger"}
-    ct_orange_cols = {"CT_I", "CT_E", "CT_S", "CT_SE", "CT_SS"}
-    ct_gray_cols = {"CT_Diff", "CT_Ger"}
-    cu_green_cols = {"CU_I", "CU_E", "CU_S", "CU_F"}
+    # --- Column groups ---
+    qt_blue_cols  = {"Qt_I","Qt_E","Qt_S","Qt_SE","Qt_SS"}
+    qt_gray_cols  = {"Qt_Diff","Qt_Ger"}
+    ct_orange_cols= {"CT_I","CT_E","CT_S","CT_SE","CT_SS"}
+    ct_gray_cols  = {"CT_Diff","CT_Ger"}
+    cu_green_cols = {"CU_I","CU_E","CU_S","CU_F"}
+    blue_cols     = {"VV_2b","VV_2c","VV_tot"}  # VV_tot same style
+    green_cols    = {"Mrg_2b","Mrg_2c","Mrg_tot"}
+    pct_cols      = {"MrgPct_2b","MrgPct_2c","MrgPct_tot"}
+    orange_cols   = {"VENDAS_2b","VENDAS_2c","VENDAS_tot"}
+    aj_int_cols   = {"Qt_Aj","Qt_AjF"}
+    aj_money_cols = {"CT_Aj","CT_AjF"}
 
-    money_cols = {"CU_I", "CT_I", "CU_E", "CT_E", "CU_F", "CT_Ger"}
-    gray_cols  = {"QT_Diff", "CU_Diff", "CT_Diff_CU"}
-    blue_cols  = {"VV_2b", "VV_2c", "VV_tot"}
-    green_cols = {"Mrg_2b", "Mrg_2c", "Mrg_tot"}
-    pct_cols   = {"MrgPct_2b", "MrgPct_2c", "MrgPct_tot"}
-    orange_cols= {"VENDAS_2b", "VENDAS_2c", "Vendas_Tot"}
-
-    # --- Apply formatting ---
+    # --- Apply ---
     ws.autofilter(0, 0, df.shape[0], df.shape[1] - 1)
     for idx, col in enumerate(df.columns):
-        width = 12
-        if col in qt_gray_cols:
-            fmt = qt_gray
-        elif col in qt_blue_cols:
-            fmt = qt_blue
-        elif col in ct_orange_cols:
-            fmt = ct_orange
-        elif col in ct_gray_cols:
-            fmt = ct_gray
-        elif col in cu_green_cols:
-            fmt = cu_green
-        elif col in blue_cols:
-            fmt = blue_money_fmt
-        elif col in green_cols:
-            fmt = green_money_fmt
-        elif col in pct_cols:
-            fmt = blue_pct_fmt
-        elif col in orange_cols:
-            fmt = orange_money_fmt
-        else:
-            fmt = None
-        width = col_widths.get(col, 12)  # default 12 if not listed
+        width = col_widths.get(col, 12)
+        fmt = None
+        if   col in qt_gray_cols:   fmt = qt_gray
+        elif col in qt_blue_cols:   fmt = qt_blue
+        elif col in ct_orange_cols: fmt = ct_orange
+        elif col in ct_gray_cols:   fmt = ct_gray
+        elif col in cu_green_cols:  fmt = cu_green
+        elif col in blue_cols:      fmt = blue_money_fmt
+        elif col in green_cols:     fmt = green_money_fmt
+        elif col in pct_cols:       fmt = blue_pct_fmt
+        elif col in orange_cols:    fmt = orange_money_fmt
+        elif col in aj_int_cols:    fmt = lightblue_int_fmt
+        elif col in aj_money_cols:  fmt = lightblue_money
+
         ws.set_column(idx, idx, width, fmt)
+
 
 def adjust_missing_inventory_progressive(dp):
     """
@@ -557,34 +553,70 @@ def adjust_missing_inventory_progressive(dp):
     remaining_budget = budget_limit + offset_value
     print(f"💵 Budget available for adjustment after neutralization: {remaining_budget:,.2f}")
 
-    # --- Step 5. Adjust remaining side progressively (cheapest first) ---
-    remaining = remaining.sort_values("CU_F", ascending=True)
+    # --- Step 5. Adjust remaining side progressively (round-robin, cheapest first) ---
+    from itertools import cycle
+
+    remaining = remaining.sort_values("CU_F", ascending=True).copy()
     total_used = 0.0
 
-    for i, row in remaining.iterrows():
-        unit_cost = row["CU_F"]
-        target_qty = abs(row["Qt_Diff"]) - abs(row["Qt_Aj"])
-        direction = np.sign(row["Qt_Diff"])  # +1 or -1
-        for _ in range(int(target_qty)):
-            if total_used + unit_cost <= remaining_budget:
-                pending.at[i, "Qt_Aj"] += direction
-                total_used += unit_cost
-            else:
+    # Initialize helper columns if missing
+    if "Qt_Aj" not in remaining.columns:
+        remaining["Qt_Aj"] = 0.0
+
+    # Create cycling iterator over item indices
+    active = remaining.index.tolist()
+    iter_cycle = cycle(active)
+
+    while active and total_used < remaining_budget:
+        i = next(iter_cycle)
+        if i not in active:
+            continue
+
+        unit_cost = remaining.at[i, "CU_F"]
+        diff = remaining.at[i, "Qt_Diff"]
+        adj  = remaining.at[i, "Qt_Aj"]
+        direction = np.sign(diff)
+
+        # Still has room to adjust and budget left?
+        if abs(adj) < abs(diff) and total_used + unit_cost <= remaining_budget:
+            remaining.at[i, "Qt_Aj"] += direction
+            total_used += unit_cost
+        else:
+            # This item is fully adjusted or over budget—remove it from cycle
+            active.remove(i)
+            if not active:
                 break
+            iter_cycle = cycle(active)
+    # --- Sync back round-robin results into pending ---
+    pending.loc[remaining.index, "Qt_Aj"] = remaining["Qt_Aj"].astype(float)
+
+    print(f"✅ Budget used for remaining side: {total_used:,.2f}")
+    print(f"📊 Final budget usage: {total_used / remaining_budget * 100:+.1f}%")
 
     # --- Step 6. Compute costs and merge back ---
-    pending["CT_Aj"] = pending["Qt_Aj"] * pending["CU_F"]
+    pending["CT_Aj"]  = pending["Qt_Aj"] * pending["CU_F"]
     pending["Qt_AjF"] = pending["Qt_Diff"] - pending["Qt_Aj"]
     pending["CT_AjF"] = pending["Qt_AjF"] * pending["CU_F"]
 
-    dp = dp.copy()
+
+    # --- Merge back into dp ---
     for col in ["Qt_Aj", "CT_Aj", "Qt_AjF", "CT_AjF"]:
-        dp[col] = 0.0
-        dp.loc[pending.index, col] = pending[col]
+        if col not in dp.columns:
+            dp.loc[:, col] = 0.0
+        dp.loc[pending.index, col] = pending[col].values
+
+    # --- Final reconciled balances (uniform, avoids notna pitfalls) ---
+    dp.loc[:, "Qt_Ger"] = dp["Qt_SE"] + dp["Qt_Aj"]
+    dp.loc[:, "CT_Ger"] = dp["CT_SE"] + dp["CT_Aj"]
 
     print(f"✅ Offset neutralized: {offset_value:,.2f}")
     print(f"✅ Budget used for remaining side: {total_used:,.2f}")
     print(f"📊 Final budget usage: {total_used / remaining_budget * 100:+.1f}%")
+
+    # --- Update final reconciled quantities and costs after adjustment ---
+    dp["Qt_Ger"] = dp["Qt_SE"] + dp["Qt_Aj"]
+    dp["CT_Ger"] = dp["CT_SE"] + dp["CT_Aj"]
+
 
     return dp
 
@@ -622,15 +654,6 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
             agg_map[col] = "first"
 
     parent_report = report
-    #parent_report = (
-    #    report.groupby("CODPP", as_index=False)
-    #    .agg(agg_map)
-    #)
-
-    # Recompute CU from CT/QT at parent level
-    print(f"✅ AA parent_report:")
-    print("🔍 Debug for CODPP = 11200")
-    print(parent_report.loc[parent_report["CODPP"] == "11200"])
 
     # Define colunas na ordem exata da aba 'Parent' desejada
     final_cols_order = [
@@ -645,9 +668,6 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
     # Filtra colunas existentes (caso alguma falte)
     parent_report = parent_report[[col for col in final_cols_order if col in parent_report.columns]]
     parent_report = adjust_missing_inventory_progressive(parent_report)
-    print(f"✅ parent_report after Aj:")
-    print("🔍 Debug for CODPP = 11200")
-    print(parent_report.loc[parent_report["CODPP"] == "11200"])
 
     # Save CSV and XLSX
     tag = yymm_to_str(year, month)
@@ -658,7 +678,7 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
             parent_report.to_excel(writer, index=False, sheet_name="Conc")
             wb = writer.book
             ws_child = writer.sheets["Conc"]
-            apply_excel_formatting(ws_child, report, wb)
+            apply_excel_formatting(ws_child, parent_report, wb)
 
     print(f"Saved: {xlsx_path}")
     return xlsx_path
