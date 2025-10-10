@@ -126,6 +126,7 @@ def process_inventory_files(year, month):
         else:
             print(f"No files found for {year}-{month_str}. Returning an empty DataFrame.")
             combined_df = pd.DataFrame(columns=['Codigo', 'Quantidade', 'Local'])
+        combined_df["CODPP"] = combined_df["Codigo"]
 
         return combined_df
 
@@ -138,8 +139,10 @@ from openpyxl.styles import Font, PatternFill
 def create_pivot_sheet(wb, df, group_col, sheet_name, year, month):
     number_format = '#,##0.00'
 
+    print("Columns available in df:", df.columns.tolist())
+
     pivot_table = df.pivot_table(
-        index=group_col,
+        index='CODPP',
         columns='Local',
         values='Quantidade_Inv',
         aggfunc='sum',
@@ -147,7 +150,7 @@ def create_pivot_sheet(wb, df, group_col, sheet_name, year, month):
     )
 
     pivot_table['Qt_SS'] = pivot_table.sum(axis=1)
-    pCT_F = df.groupby(group_col)['CT_F'].sum()
+    pCT_F = df.groupby('CODPP')['CT_F'].sum()
     pivot_table['CT_F'] = pCT_F
     pivot_table['CU_F'] = pivot_table['CT_F'] / pivot_table['Qt_SS']
     pivot_table['AnoMes'] = (year % 100) * 100 + month
@@ -199,12 +202,7 @@ def lookup_cu_values(inventory_df, anomes):
     try:
         entradas_df = pd.read_excel(
             os.path.join(base_dir, 'Tables', 'T_Entradas.xlsx'),
-            dtype={'Pai': str, 'Filho': str}
-        )
-
-        prodf_df = pd.read_excel(
-            os.path.join(base_dir, 'Tables', 'T_ProdF.xlsx'),
-            dtype={'CodPF': str, 'CodPP': str}
+            dtype={'Pai': str}
         )
 
         # ➤ Converte a data da última entrada
@@ -218,19 +216,28 @@ def lookup_cu_values(inventory_df, anomes):
             ]
         )
 
-        inventory_df['Codigo'] = inventory_df['Codigo'].astype(str)
-        inventory_df.rename(columns={'Quantidade': 'Quantidade_Inv', 'Codigo': 'Codigo_Inv'}, inplace=True)
+        # --- Normalize key columns ---
+        inventory_df["CODPP"] = inventory_df["CODPP"].astype(str).str.strip().str.upper()
+        last_cu_pai["Pai"] = last_cu_pai["Pai"].astype(str).str.strip().str.upper()
 
-        prodf_df.rename(columns={'CodPF': 'CodPF_Prod', 'CodPP': 'CodPP_Prod'}, inplace=True)
+        # --- Rename quantity column for clarity ---
+        inventory_df.rename(columns={"Quantidade": "Quantidade_Inv"}, inplace=True)
 
-        inventory_df = pd.merge(inventory_df, prodf_df[['CodPF_Prod', 'CodPP_Prod']], 
-                                left_on='Codigo_Inv', right_on='CodPF_Prod', how='left')
-        inventory_df['CodPP_Prod'] = inventory_df['CodPP_Prod'].fillna(inventory_df['Codigo_Inv'])
+        # --- Merge directly by parent SKU (CodPP / Pai) ---
+        # Step 1: ensure every inventory line has a CodPP (if any missing, keep itself)
+        inventory_df["CODPP"] = inventory_df["CODPP"].fillna(inventory_df["Codigo"])
 
-        inventory_df = pd.merge(inventory_df, last_cu_pai, 
-                                left_on='CodPP_Prod', right_on='Pai', how='left')
+        # Step 3: merge with last known parent cost table
+        inventory_df = inventory_df.merge(
+            last_cu_pai,
+            left_on="CODPP",
+            right_on="Pai",
+            how="left"
+        )
 
-        inventory_df['Quantidade_Inv'] = pd.to_numeric(inventory_df['Quantidade_Inv'], errors='coerce').fillna(0)
+        # --- Clean up and finalize ---
+        inventory_df["Quantidade_Inv"] = pd.to_numeric(inventory_df["Quantidade_Inv"], errors="coerce").fillna(0)
+
 
         inventory_df['CT_E'] = inventory_df['CU_E'] * inventory_df['Quantidade_Inv']
         inventory_df['CT_I'] = inventory_df['CU_I'] * inventory_df['Quantidade_Inv']
