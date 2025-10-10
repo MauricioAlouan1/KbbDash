@@ -183,12 +183,12 @@ def load_curr_inventory_data(file_path: Path) -> pd.DataFrame:
 
 def load_prev_inventory_data(file_path: Path) -> pd.DataFrame:
     print(f"🟡 Loading previous inventory from: {file_path}")
-    df = pd.read_excel(file_path, sheet_name="Conc")
+    df = pd.read_excel(file_path, sheet_name="PT_pp")
 
     # Identify the code column
-    code_col = "CODPP"
+    code_col = "Pai"
     if code_col not in df.columns:
-        print("❌ Column 'CODPP' not found — please check file header names.")
+        print("❌ Column 'Pai' not found — please check file header names.")
     else:
         print(f"✅ Using code column: {code_col}")
 
@@ -284,7 +284,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     tables_dir = resolve_tables_dir(year, month)
 
     # files
-    prev_inv_path = find_existing_excel(prev_dir, f"Conc_Estoq_{prev_tag}")
+    prev_inv_path = find_existing_excel(prev_dir, f"{INV_PREFIX}{prev_tag}")
     this_inv_path = find_existing_excel(this_dir,  f"{INV_PREFIX}{this_tag}")
     resumo_path   = find_existing_excel(this_dir,  f"{RESUMO_PREFIX}{this_tag}")
 

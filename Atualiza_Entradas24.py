@@ -156,12 +156,12 @@ def get_prev_month(year: int, month: int) -> tuple[int, int]:
 
 def load_previous_qtgerx(base_dir: str, prev_year: int, prev_month: int) -> pd.DataFrame:
     tag = f"{prev_year:04d}_{prev_month:02d}"
-    file_path = os.path.join(base_dir, "clean", tag, f"Conc_Estoq_{tag}.xlsx")
+    file_path = os.path.join(base_dir, "clean", tag, f"R_Estoq_fdm_{tag}.xlsx")
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"❌ Previous month file not found: {file_path}")
     
-    df = pd.read_excel(file_path, sheet_name="Conc", dtype={"CODPP": str})
-    df["CodPP"] = df["CODPP"].astype(str).str.strip()
+    df = pd.read_excel(file_path, sheet_name="PT_pp", dtype={"Pai": str})
+    df["CodPP"] = df["Pai"].astype(str).str.strip()
     df["Qt_Ger"] = pd.to_numeric(df["Qt_Ger"], errors="coerce").fillna(0)
     return df[["CodPP", "Qt_Ger"]]
 
