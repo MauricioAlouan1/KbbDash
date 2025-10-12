@@ -620,6 +620,78 @@ def adjust_missing_inventory_progressive(dp):
 
     return dp
 
+def adjust_missing_inventory_budget(dp):
+    """
+    Adjusts missing/excess inventory by booking the difference into a single item 'Ajuste_Estoque'.
+    
+    Step 1: Calculates natural offset between positive and negative Qt_Diff sides.
+    Step 2: Adds the smaller side (offset value) to the available adjustment budget (2% of CT_S total).
+    Step 3: Applies the available budget as a value adjustment (CT_Ger) into an 'Ajuste_Estoque' item.
+            - If it doesn’t exist, creates it.
+            - If it exists, increments/decrements its CT_Ger accordingly.
+    """
+
+    import numpy as np
+    import pandas as pd
+
+    # --- Step 1. Setup and budget ---
+    total_ct_s = dp["CT_S"].sum(skipna=True)
+    budget_limit = total_ct_s * 0.02
+    print(f"💰 Total cost of goods sold (CT_S): {total_ct_s:,.2f}")
+    print(f"🎯 Budget range: ±{budget_limit:,.2f}")
+
+    # Pending = valid diff rows
+    pending = dp.dropna(subset=["CU_F", "Qt_Diff"]).copy()
+    pending["CT_DiffVal"] = pending["Qt_Diff"] * pending["CU_F"]
+
+    pos = pending[pending["Qt_Diff"] > 0]
+    neg = pending[pending["Qt_Diff"] < 0]
+
+    total_pos = (pos["Qt_Diff"] * pos["CU_F"]).sum()
+    total_neg = (neg["Qt_Diff"] * neg["CU_F"]).sum()  # negative
+    print(f"➕ Positive side total: {total_pos:,.2f}")
+    print(f"➖ Negative side total: {total_neg:,.2f}")
+
+    # Step 2. Neutralize smaller side and get remaining imbalance
+    offset_value = min(abs(total_pos), abs(total_neg))
+    imbalance = total_pos + total_neg  # this is net imbalance (can be + or -)
+    print(f"⚖️ Natural offset applied (no budget impact): {offset_value:,.2f}")
+    print(f"📊 Remaining imbalance (after offset): {imbalance:,.2f}")
+
+    # Step 3. Calculate available adjustment amount (within budget)
+    remaining_budget = budget_limit + offset_value
+    adj_value = np.clip(imbalance, -remaining_budget, remaining_budget)
+    print(f"💵 Budget available for adjustment: {remaining_budget:,.2f}")
+    print(f"✅ Adjustment value to apply: {adj_value:,.2f}")
+
+    # --- Step 4. Apply or create 'Ajuste_Estoque' record ---
+    if "Ajuste_Estoque" not in dp["CODPP"].values:
+        print("🆕 Creating 'Ajuste_Estoque' item in dataset...")
+        new_row = {
+            "CODPP": "Ajuste_Estoque",
+            "Qt_I": 0, "Qt_E": 0.0, "Qt_S": 0.0, "Qt_SE": 0.0,
+            "CT_I": 0, "CT_E": 0.0, "CT_S": 0.0, "CT_SE": 0.0,
+            "CU_F": 0.0,
+            "Qt_Ger": 0.0, "CT_Ger": 0.0
+        }
+        dp = pd.concat([dp, pd.DataFrame([new_row])], ignore_index=True)
+
+    idx_adj = dp.index[dp["CODPP"] == "Ajuste_Estoque"][0]
+
+    # Ensure columns exist
+    for c in ["CT_Ger", "Qt_Ger"]:
+        if c not in dp.columns:
+            dp[c] = 0.0
+
+    # Apply adjustment in CT_Ger (value only)
+    dp.at[idx_adj, "CT_Ger"] = dp.get("CT_Ger", pd.Series(0, index=dp.index)).iloc[idx_adj] + adj_value
+    dp.at[idx_adj, "Qt_Ger"] = 0.0  # purely value-based
+
+    print(f"📦 'Ajuste_Estoque' CT_Ger now: {dp.at[idx_adj, 'CT_Ger']:,.2f}")
+    print("✅ Adjustment completed successfully.")
+
+    return dp
+
 # -----------------------
 # CLI / Runner
 # -----------------------
@@ -667,7 +739,7 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
     ]
     # Filtra colunas existentes (caso alguma falte)
     parent_report = parent_report[[col for col in final_cols_order if col in parent_report.columns]]
-    parent_report = adjust_missing_inventory_progressive(parent_report)
+    #parent_report = adjust_missing_inventory_budget(parent_report)
 
     # Save CSV and XLSX
     tag = yymm_to_str(year, month)
