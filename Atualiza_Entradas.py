@@ -38,8 +38,6 @@ def resolve_base_dir():
 # 2. Data Loading and Processing
 # ─────────────────────────────────────────────────────────────
 def load_entrada_df(file_path: str) -> pd.DataFrame:
-    from openpyxl import load_workbook
-
     wb = load_workbook(file_path, data_only=True)
     ws = wb.active
     data = ws.values
@@ -106,6 +104,7 @@ def write_column_to_excel(df: pd.DataFrame, excel_path: str, out_path: str,
 
     wb.save(out_path)
     return written
+
 def apply_qtip_values(df: pd.DataFrame, target_ano_mes: int, base_dir: str, year: int, month: int) -> pd.DataFrame:
     prev_year, prev_month = get_prev_month(year, month)
     prev_df = load_previous_qtgerx(base_dir, prev_year, prev_month)
@@ -126,30 +125,36 @@ def calculate_qtsp_from_resumo(base_dir: str, year: int, month: int) -> pd.DataF
     if os.path.exists(resumo_path):
         # O_NFCI
         df_nfci = pd.read_excel(resumo_path, sheet_name="O_NFCI")
-        df_nfci["Pai"] = df_nfci["CODPP"].astype(str).str.upper().str.strip()
+        df_nfci["CODPP"] = df_nfci["CODPP"].astype(str).str.upper().str.strip()
         df_nfci["QTD"] = pd.to_numeric(df_nfci["QTD"], errors="coerce").fillna(0)
         df_nfci["ANOMES"] = pd.to_numeric(df_nfci["ANOMES"], errors="coerce")
         df_nfci = df_nfci[df_nfci["ANOMES"] == ano_mes]
-        vendas.append(df_nfci[["Pai", "QTD"]])
+        vendas.append(df_nfci[["CODPP", "QTD"]])
 
         # L_LPI
         df_lpi = pd.read_excel(resumo_path, sheet_name="L_LPI")
         df_lpi = df_lpi[df_lpi["STATUS PEDIDO"].astype(str).str.upper() != "CANCELADO"]
         df_lpi = df_lpi[df_lpi["EMPRESA"].astype(str).str.upper() == "K"]
-        df_lpi["Pai"] = df_lpi["CODPP"].astype(str).str.upper().str.strip()
+        df_lpi["CODPP"] = df_lpi["CODPP"].astype(str).str.upper().str.strip()
         df_lpi["QTD"] = pd.to_numeric(df_lpi["QTD"], errors="coerce").fillna(0)
         df_lpi["ANOMES"] = pd.to_numeric(df_lpi["ANOMES"], errors="coerce")
         df_lpi = df_lpi[df_lpi["ANOMES"] == ano_mes]
-        vendas.append(df_lpi[["Pai", "QTD"]])
+        vendas.append(df_lpi[["CODPF", "QTD"]])
 
     if not vendas:
-        raise ValueError(f"Nenhum dado de vendas encontrado para AnoMes {ano_mes}.")
+        raise ValueError(f"Nenhum dado de vendas encontrado para AnoMes {ano_mes} em 'O_NFCI' ou 'L_LPI'.")
 
+    # Junta tudo
     df_all = pd.concat(vendas, axis=0)
-    qtsp_df = df_all.groupby("Pai", as_index=False)["QTD"].sum().rename(columns={"QTD": "Qt_S"})
-    #print(f"✅ Qt_S Summary:\n{qtsp_df.head(100)}")
+    df_all = df_all.groupby("CODPP", as_index=False)["QTD"].sum().rename(columns={"QTD": "Qt_S"})
 
-    return qtsp_df
+    df_all["CODPP"] = df_all["CODPP"].astype(str).str.upper().str.strip()
+
+    # Agrupa por Pai
+    final_df = df_all.groupby("CODPP", as_index=False)["Qt_S"].sum()
+    print(final_df.head())
+
+    return final_df
 
 def get_prev_month(year: int, month: int) -> tuple[int, int]:
     if month == 1:
@@ -163,10 +168,10 @@ def load_previous_qtgerx(base_dir: str, prev_year: int, prev_month: int) -> pd.D
         raise FileNotFoundError(f"❌ Previous month file not found: {file_path}")
     
     df = pd.read_excel(file_path, sheet_name="Conc", dtype={"CODPP": str})
-    df["CodPP"] = df["CODPP"].astype(str).str.strip()
+    df["CODPP"] = df["CODPP"].astype(str).str.strip()
     df["Qt_Ger"] = pd.to_numeric(df["Qt_Ger"], errors="coerce").fillna(0)
-    return df[["CodPP", "Qt_Ger"]]
-
+    df["CU_F"] = pd.to_numeric(df["CU_F"], errors="coerce").fillna(0)
+    return df[["CodPP", "Qt_Ger", "CU_F"]]
 
 # ─────────────────────────────────────────────────────────────
 # 4. Main logic
@@ -213,8 +218,8 @@ def main():
     print("\n✅ Matching Pai found in Qt_S summary:")
     print(matching_qtsp if not matching_qtsp.empty else "⚠️ None found!")
 
-    print("\n❌ Non-matching Pai in Qt_S summary (first 20):")
-    print(non_matching_qtsp.head(20))
+    #print("\n❌ Non-matching Pai in Qt_S summary (first 20):")
+    #print(non_matching_qtsp.head(20))
 
     # Mapear valores de Qt_S baseados na coluna 'Pai'
     qtsp_map = qtsp_df.set_index("Pai")["Qt_S"].to_dict()
@@ -238,7 +243,7 @@ def main():
         df, excel_path=file_path, out_path=out_path,
         ano_mes=ano_mes, column_name="CU_I", values_series=df["CU_I_new"]
     )
-    print(f"✅ Wrote {written} CUPI values for AnoMes {ano_mes}")    
+    print(f"✅ Wrote {written} CU_I values for AnoMes {ano_mes}")    
  
     written_qtip = write_column_to_excel(
         df, excel_path=out_path, out_path=out_path,

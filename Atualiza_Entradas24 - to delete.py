@@ -3,7 +3,7 @@ import pandas as pd
 from openpyxl import load_workbook
 
 # ─────────────────────────────────────────────────────────────
-# 1. Prompt Logic
+# 1. Prompt Logic - 2024
 # ─────────────────────────────────────────────────────────────
 def _prompt_year_month():
     import argparse
@@ -38,10 +38,19 @@ def resolve_base_dir():
 # 2. Data Loading and Processing
 # ─────────────────────────────────────────────────────────────
 def load_entrada_df(file_path: str) -> pd.DataFrame:
-    df = pd.read_excel(file_path, dtype={'Pai': str, 'Filho': str})
-    df["AnoMes"] = pd.to_numeric(df["AnoMes"], errors="coerce").astype("Int64")
-    df["CU_E"] = pd.to_numeric(df["CU_E"], errors="coerce")
-    df["CU_F"] = pd.to_numeric(df["CU_F"], errors="coerce")
+    wb = load_workbook(file_path, data_only=True)
+    ws = wb.active
+    data = ws.values
+    columns = next(data)
+    df = pd.DataFrame(data, columns=columns)
+
+    if "Pai" in df.columns:
+        df["Pai"] = df["Pai"].astype(str).str.strip()
+    if "AnoMes" in df.columns:
+        df["AnoMes"] = pd.to_numeric(df["AnoMes"], errors="coerce").astype("Int64")
+    for col in ["CU_E", "CU_F"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
 def build_prior_cupf_lookup(df: pd.DataFrame, target_ano_mes: int) -> pd.DataFrame:
@@ -74,25 +83,24 @@ def write_column_to_excel(df: pd.DataFrame, excel_path: str, out_path: str,
         ws.cell(row=1, column=col_idx, value=column_name)
         col_map[column_name] = col_idx
 
-    target_rows = df[df["AnoMes"] == ano_mes]
+    # Normalize
+    df["Pai"] = df["Pai"].astype(str).str.strip()
+    values_series.index = values_series.index.astype(str).str.strip()
+
     written = 0
-
     print(f"\n📝 Linhas escritas em '{column_name}' (AnoMes = {ano_mes}):")
-    for idx, row in target_rows.iterrows():
-        excel_row = idx + 2
 
-        # 🟢 Se values_series tem índice igual ao df → usa idx
-        # 🟢 Se values_series tem índice = Pai → usa row['Pai']
-        if idx in values_series.index:
-            val = values_series.loc[idx]
-        else:
-            pai = row.get("Pai", row.get("Codigo", None))
-            val = values_series.get(pai, None)
+    # Loop through each row in Excel and update if Pai + AnoMes match
+    for row_idx in range(2, ws.max_row + 1):
+        cell_pai = str(ws.cell(row=row_idx, column=col_map.get("Pai", 0)).value or "").strip()
+        cell_anomes = ws.cell(row=row_idx, column=col_map.get("AnoMes", 0)).value
 
-        ws.cell(row=excel_row, column=col_map[column_name],
-                value=float(val) if pd.notna(val) else 0)
-        written += 1
-        print(f"→ Linha Excel {excel_row}: Pai={row.get('Pai', row.get('Codigo','???'))}, {column_name}={val}")
+        if str(cell_pai) in values_series.index and cell_anomes == ano_mes:
+            val = values_series.get(cell_pai)
+            if pd.notna(val):
+                ws.cell(row=row_idx, column=col_map[column_name], value=float(val))
+                written += 1
+                print(f"→ Linha Excel {row_idx}: Pai={cell_pai}, {column_name}={val}")
 
     wb.save(out_path)
     return written
@@ -120,8 +128,7 @@ def calculate_qtsp_from_resumo(base_dir: str, year: int, month: int) -> pd.DataF
         df_nfci["CODPP"] = df_nfci["CODPP"].astype(str).str.upper().str.strip()
         df_nfci["QTD"] = pd.to_numeric(df_nfci["QTD"], errors="coerce").fillna(0)
         df_nfci["ANOMES"] = pd.to_numeric(df_nfci["ANOMES"], errors="coerce")
-
-        # 🔹 Filtra pelo AnoMes atual
+        df_nfci = df_nfci[df_nfci["ANOMES"] == ano_mes]
         vendas.append(df_nfci[["CODPP", "QTD"]])
 
         # L_LPI
@@ -131,8 +138,7 @@ def calculate_qtsp_from_resumo(base_dir: str, year: int, month: int) -> pd.DataF
         df_lpi["CODPP"] = df_lpi["CODPP"].astype(str).str.upper().str.strip()
         df_lpi["QTD"] = pd.to_numeric(df_lpi["QTD"], errors="coerce").fillna(0)
         df_lpi["ANOMES"] = pd.to_numeric(df_lpi["ANOMES"], errors="coerce")
-
-        # 🔹 Filtra pelo AnoMes atual
+        df_lpi = df_lpi[df_lpi["ANOMES"] == ano_mes]
         vendas.append(df_lpi[["CODPF", "QTD"]])
 
     if not vendas:
@@ -142,13 +148,14 @@ def calculate_qtsp_from_resumo(base_dir: str, year: int, month: int) -> pd.DataF
     df_all = pd.concat(vendas, axis=0)
     df_all = df_all.groupby("CODPP", as_index=False)["QTD"].sum().rename(columns={"QTD": "Qt_S"})
 
-    df_all["Pai"] = df_all["CODPP"].astype(str).str.upper().str.strip()
+    df_all["CODPP"] = df_all["CODPP"].astype(str).str.upper().str.strip()
 
     # Agrupa por Pai
-    final_df = df_all.groupby("Pai", as_index=False)["Qt_S"].sum()
+    final_df = df_all.groupby("CODPP", as_index=False)["Qt_S"].sum()
     print(final_df.head())
 
     return final_df
+
 def get_prev_month(year: int, month: int) -> tuple[int, int]:
     if month == 1:
         return year - 1, 12
@@ -156,15 +163,15 @@ def get_prev_month(year: int, month: int) -> tuple[int, int]:
 
 def load_previous_qtgerx(base_dir: str, prev_year: int, prev_month: int) -> pd.DataFrame:
     tag = f"{prev_year:04d}_{prev_month:02d}"
-    file_path = os.path.join(base_dir, "clean", tag, f"R_Estoq_fdm_{tag}.xlsx")
+    file_path = os.path.join(base_dir, "clean", tag, f"Conc_Estoq_{tag}.xlsx")
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"❌ Previous month file not found: {file_path}")
     
-    df = pd.read_excel(file_path, sheet_name="PT_pp", dtype={"Pai": str})
-    df["CodPP"] = df["Pai"].astype(str).str.strip()
+    df = pd.read_excel(file_path, sheet_name="Conc", dtype={"CODPP": str})
+    df["CODPP"] = df["CODPP"].astype(str).str.strip()
     df["Qt_Ger"] = pd.to_numeric(df["Qt_Ger"], errors="coerce").fillna(0)
-    return df[["CodPP", "Qt_Ger"]]
-
+    df["CU_F"] = pd.to_numeric(df["CU_F"], errors="coerce").fillna(0)
+    return df[["CodPP", "Qt_Ger", "CU_F"]]
 
 # ─────────────────────────────────────────────────────────────
 # 4. Main logic
@@ -192,21 +199,51 @@ def main():
         exit()
 
     df = load_entrada_df(file_path)
+    print(f"\n🔍 Pai values in T_Entradas for AnoMes {ano_mes}:")
+    print(df[df["AnoMes"] == ano_mes]["Pai"].dropna().unique())
+
     df = apply_cupi_values(df, ano_mes)
     df = apply_qtip_values(df, ano_mes, base_dir, year, month)
     # Calcular Qt_S por Pai
+
     qtsp_df = calculate_qtsp_from_resumo(base_dir, year, month)
+
+    # 🧩 Debug: check which Pai match between T_Entradas and Qt_S summary
+    target_pais = df[df["AnoMes"] == ano_mes]["Pai"].dropna().astype(str).str.strip().unique()
+    print(f"\n🔍 Pai values in T_Entradas for AnoMes {ano_mes}: {list(target_pais)}")
+
+    matching_qtsp = qtsp_df[qtsp_df["Pai"].isin(target_pais)].copy()
+    non_matching_qtsp = qtsp_df[~qtsp_df["Pai"].isin(target_pais)].copy()
+
+    print("\n✅ Matching Pai found in Qt_S summary:")
+    print(matching_qtsp if not matching_qtsp.empty else "⚠️ None found!")
+
+    #print("\n❌ Non-matching Pai in Qt_S summary (first 20):")
+    #print(non_matching_qtsp.head(20))
+
     # Mapear valores de Qt_S baseados na coluna 'Pai'
     qtsp_map = qtsp_df.set_index("Pai")["Qt_S"].to_dict()
     df["Qt_S"] = df["Pai"].map(qtsp_map)
 
-    aligned_qtsp_series = df.set_index("Pai").index.map(qtsp_df.set_index("Pai")["Qt_S"].to_dict())
-    df["Qt_S"] = aligned_qtsp_series
+
+
+
+    # Make sure Pai is string in both DataFrame and values_series
+    df["Pai"] = df["Pai"].astype(str).str.strip()
+
+    qtsp_series = qtsp_df.copy()
+    qtsp_series["Pai"] = qtsp_series["Pai"].astype(str).str.strip()
+    qtsp_series = qtsp_series.set_index("Pai")["Qt_S"]
+
+    qtsp_series = qtsp_df.copy()
+    qtsp_series["Pai"] = qtsp_series["Pai"].astype(str).str.strip()
+    qtsp_series = qtsp_series.set_index("Pai")["Qt_S"]
+
     written = write_column_to_excel(
         df, excel_path=file_path, out_path=out_path,
         ano_mes=ano_mes, column_name="CU_I", values_series=df["CU_I_new"]
     )
-    print(f"✅ Wrote {written} CUPI values for AnoMes {ano_mes}")    
+    print(f"✅ Wrote {written} CU_I values for AnoMes {ano_mes}")    
  
     written_qtip = write_column_to_excel(
         df, excel_path=out_path, out_path=out_path,
