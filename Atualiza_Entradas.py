@@ -53,68 +53,83 @@ def load_entrada_df(file_path: str) -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
-def build_prior_cupf_lookup(df: pd.DataFrame, target_ano_mes: int) -> pd.DataFrame:
-    prior = df[df["AnoMes"].notna() & (df["AnoMes"] < target_ano_mes)].copy()
-    return (
-        prior.sort_values(["Pai", "AnoMes"])
-             .drop_duplicates("Pai", keep="last")[["Pai", "CU_F"]]
-             .rename(columns={"CU_F": "CU_F_prior"})
+def apply_prev_month_values(df: pd.DataFrame, base_dir: str, year: int, month: int) -> pd.DataFrame:
+    """
+    Fills Qt_I and CU_I_new based on previous month's Conc_Estoq_<tag>.xlsx.
+    - Qt_I = previous month's Qt_Ger
+    - CU_I_new = previous month's CU_F
+    - If not found: Qt_I = 0, CU_I_new = CU_E
+    """
+    import numpy as np
+
+    prev_year, prev_month = get_prev_month(year, month)
+    tag = f"{prev_year:04d}_{prev_month:02d}"
+    file_path = os.path.join(base_dir, "clean", tag, f"Conc_Estoq_{tag}.xlsx")
+
+    if not os.path.exists(file_path):
+        print(f"⚠️ Arquivo anterior não encontrado: {file_path}")
+        df["Qt_I"] = 0
+        df["CU_I_new"] = df["CU_E"]
+        return df
+
+    print(f"🔁 Lendo dados do mês anterior: {file_path}")
+    prev_df = pd.read_excel(file_path, sheet_name="Conc", dtype={"CODPP": str})
+    prev_df["CODPP"] = prev_df["CODPP"].astype(str).str.strip().str.upper()
+    prev_df["Qt_Ger"] = pd.to_numeric(prev_df["Qt_Ger"], errors="coerce").fillna(0)
+    prev_df["CU_F"]   = pd.to_numeric(prev_df["CU_F"], errors="coerce").fillna(0)
+
+    df["Pai"] = df["Pai"].astype(str).str.strip().str.upper()
+
+    # Merge both Qt_Ger and CU_F
+    df = df.merge(
+        prev_df[["CODPP", "Qt_Ger", "CU_F"]].rename(columns={"CU_F": "CU_F_prev", "Qt_Ger": "Qt_Ger_prev"}),
+        left_on="Pai", right_on="CODPP", how="left"
     )
 
-def apply_cupi_values(df: pd.DataFrame, target_ano_mes: int) -> pd.DataFrame:
-    prior_cupf = build_prior_cupf_lookup(df, target_ano_mes)
-    df = df.merge(prior_cupf, on="Pai", how="left")
-    df["CU_I_new"] = df["CU_F_prior"].where(df["CU_F_prior"].notna(), df["CU_E"])
+    # Apply fallback logic for new items
+    df["Qt_I"] = np.where(df["Qt_Ger_prev"].notna(), df["Qt_Ger_prev"], 0)
+    df["CU_I_new"] = np.where(df["CU_F_prev"].notna() & (df["CU_F_prev"] > 0), df["CU_F_prev"], df["CU_E"])
+
+    print(f"✅ Aplicados valores do mês anterior para {df['Qt_Ger_prev'].notna().sum()} itens existentes.")
+    print(f"🆕 Itens novos com Qt_I=0 e CU_I=CU_E: {(df['Qt_Ger_prev'].isna()).sum()}")
+
     return df
+
 
 # ─────────────────────────────────────────────────────────────
 # 3. Excel Writing (with formatting preserved)
 # ────────────────────────────────────────────────────────
-def write_column_to_excel(df: pd.DataFrame, excel_path: str, out_path: str,
-                          ano_mes: int, column_name: str, values_series: pd.Series):
+def write_column_to_excel(df, excel_path, out_path, ano_mes, column_name, values_series):
     wb = load_workbook(excel_path)
     ws = wb.active
 
     headers = [cell.value for cell in ws[1]]
     col_map = {str(h): i + 1 for i, h in enumerate(headers)}
 
+    # Add column if missing
     if column_name not in col_map:
         col_idx = len(headers) + 1
         ws.cell(row=1, column=col_idx, value=column_name)
         col_map[column_name] = col_idx
 
-    # Normalize
-    df["Pai"] = df["Pai"].astype(str).str.strip()
+    # Normalize keys
     values_series.index = values_series.index.astype(str).str.strip()
-
     written = 0
     print(f"\n📝 Linhas escritas em '{column_name}' (AnoMes = {ano_mes}):")
 
-    # Loop through each row in Excel and update if Pai + AnoMes match
     for row_idx in range(2, ws.max_row + 1):
         cell_pai = str(ws.cell(row=row_idx, column=col_map.get("Pai", 0)).value or "").strip()
         cell_anomes = ws.cell(row=row_idx, column=col_map.get("AnoMes", 0)).value
 
-        if str(cell_pai) in values_series.index and cell_anomes == ano_mes:
-            val = values_series.get(cell_pai)
+        if cell_anomes == ano_mes and cell_pai in values_series.index:
+            val = values_series.loc[cell_pai]
             if pd.notna(val):
                 ws.cell(row=row_idx, column=col_map[column_name], value=float(val))
                 written += 1
-                print(f"→ Linha Excel {row_idx}: Pai={cell_pai}, {column_name}={val}")
+                print(f"→ Linha {row_idx}: Pai={cell_pai}, {column_name}={val}")
 
     wb.save(out_path)
     return written
-
-def apply_qtip_values(df: pd.DataFrame, target_ano_mes: int, base_dir: str, year: int, month: int) -> pd.DataFrame:
-    prev_year, prev_month = get_prev_month(year, month)
-    prev_df = load_previous_qtgerx(base_dir, prev_year, prev_month)
-
-    df["Pai"] = df["Pai"].astype(str).str.strip()
-    prev_df["CODPP"] = prev_df["CODPP"].astype(str).str.strip()
-
-    df = df.merge(prev_df, left_on="Pai", right_on="CODPP", how="left")
-    df["Qt_I"] = df["Qt_Ger"].fillna(0)
-    return df
 
 def calculate_qtsp_from_resumo(base_dir: str, year: int, month: int) -> pd.DataFrame:
     resumo_path = os.path.join(base_dir, "clean", f"{year}_{month:02d}", f"R_Resumo_{year}_{month:02d}.xlsm")
@@ -184,60 +199,6 @@ def get_prev_month(year: int, month: int) -> tuple[int, int]:
         return year - 1, 12
     return year, month - 1
 
-def load_previous_qtgerx(base_dir: str, prev_year: int, prev_month: int) -> pd.DataFrame:
-    tag = f"{prev_year:04d}_{prev_month:02d}"
-    file_path = os.path.join(base_dir, "clean", tag, f"Conc_Estoq_{tag}.xlsx")
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"❌ Previous month file not found: {file_path}")
-    
-    df = pd.read_excel(file_path, sheet_name="Conc", dtype={"CODPP": str})
-    df["CODPP"] = df["CODPP"].astype(str).str.strip()
-    df["Qt_Ger"] = pd.to_numeric(df["Qt_Ger"], errors="coerce").fillna(0)
-    df["CU_F"] = pd.to_numeric(df["CU_F"], errors="coerce").fillna(0)
-    return df[["CODPP", "Qt_Ger", "CU_F"]]
-
-def apply_prev_month_values(df: pd.DataFrame, base_dir: str, year: int, month: int) -> pd.DataFrame:
-    """
-    Fills Qt_I and CU_I_new based on previous month's Conc_Estoq_<tag>.xlsx.
-    - Qt_I = previous month's Qt_Ger
-    - CU_I_new = previous month's CU_F
-    - If not found: Qt_I = 0, CU_I_new = CU_E
-    """
-    import numpy as np
-
-    prev_year, prev_month = get_prev_month(year, month)
-    tag = f"{prev_year:04d}_{prev_month:02d}"
-    file_path = os.path.join(base_dir, "clean", tag, f"Conc_Estoq_{tag}.xlsx")
-
-    if not os.path.exists(file_path):
-        print(f"⚠️ Arquivo anterior não encontrado: {file_path}")
-        df["Qt_I"] = 0
-        df["CU_I_new"] = df["CU_E"]
-        return df
-
-    print(f"🔁 Lendo dados do mês anterior: {file_path}")
-    prev_df = pd.read_excel(file_path, sheet_name="Conc", dtype={"CODPP": str})
-    prev_df["CODPP"] = prev_df["CODPP"].astype(str).str.strip().str.upper()
-    prev_df["Qt_Ger"] = pd.to_numeric(prev_df["Qt_Ger"], errors="coerce").fillna(0)
-    prev_df["CU_F"]   = pd.to_numeric(prev_df["CU_F"], errors="coerce").fillna(0)
-
-    df["Pai"] = df["Pai"].astype(str).str.strip().str.upper()
-
-    # Merge both Qt_Ger and CU_F
-    df = df.merge(
-        prev_df[["CODPP", "Qt_Ger", "CU_F"]].rename(columns={"CU_F": "CU_F_prev", "Qt_Ger": "Qt_Ger_prev"}),
-        left_on="Pai", right_on="CODPP", how="left"
-    )
-
-    # Apply fallback logic for new items
-    df["Qt_I"] = np.where(df["Qt_Ger_prev"].notna(), df["Qt_Ger_prev"], 0)
-    df["CU_I_new"] = np.where(df["CU_F_prev"].notna() & (df["CU_F_prev"] > 0), df["CU_F_prev"], df["CU_E"])
-
-    print(f"✅ Aplicados valores do mês anterior para {df['Qt_Ger_prev'].notna().sum()} itens existentes.")
-    print(f"🆕 Itens novos com Qt_I=0 e CU_I=CU_E: {(df['Qt_Ger_prev'].isna()).sum()}")
-
-    return df
-
 
 # ─────────────────────────────────────────────────────────────
 # 4. Main logic
@@ -295,9 +256,9 @@ def main():
     # Make sure Pai is string in both DataFrame and values_series
     df["Pai"] = df["Pai"].astype(str).str.strip()
 
-    qtsp_series = qtsp_df.copy()
-    qtsp_series["CODPP"] = qtsp_series["CODPP"].astype(str).str.strip()
-    qtsp_series = qtsp_series.set_index("CODPP")["Qt_S"]
+    #qtsp_series = qtsp_df.copy()
+    #qtsp_series["CODPP"] = qtsp_series["CODPP"].astype(str).str.strip()
+    #qtsp_series = qtsp_series.set_index("CODPP")["Qt_S"]
 
     # 🔧 Normalize index before writing (avoid duplicate Pai and Series issues)
     df_unique = (
