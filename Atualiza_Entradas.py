@@ -123,12 +123,44 @@ def write_column_to_excel(df, excel_path, out_path, ano_mes, column_name, values
 
         if cell_anomes == ano_mes and cell_pai in values_series.index:
             val = values_series.loc[cell_pai]
-            if pd.notna(val):
+            if val is not None and (pd.notna(val) or val == 0):
                 ws.cell(row=row_idx, column=col_map[column_name], value=float(val))
                 written += 1
                 print(f"→ Linha {row_idx}: Pai={cell_pai}, {column_name}={val}")
 
     wb.save(out_path)
+    print(f"📤 Returning written={written} for column '{column_name}'")
+    return written
+
+def write_column_by_index_to_excel(df, excel_path, out_path, column_name, values_series):
+    wb = load_workbook(excel_path)
+    ws = wb.active
+
+    # Mapear cabeçalhos
+    headers = [cell.value for cell in ws[1]]
+    col_map = {str(h): i + 1 for i, h in enumerate(headers)}
+
+    # Criar coluna se não existir
+    if column_name not in col_map:
+        col_idx = len(headers) + 1
+        ws.cell(row=1, column=col_idx, value=column_name)
+        col_map[column_name] = col_idx
+
+    # Forçar índices como inteiros (linhas do Excel)
+    values_series.index = values_series.index.astype(int)
+    written = 0
+
+    print(f"\n📝 Linhas escritas por índice em '{column_name}':")
+    for idx, val in values_series.items():
+        excel_row = idx + 2  # Excel data starts at row 2
+
+        if pd.notna(val) or val == 0:
+            ws.cell(row=excel_row, column=col_map[column_name], value=float(val))
+            written += 1
+            print(f"→ Linha {excel_row}: index={idx}, {column_name}={val}")
+
+    wb.save(out_path)
+    print(f"📤 Returning written={written} for column '{column_name}'")
     return written
 
 def calculate_qtsp_from_resumo(base_dir: str, year: int, month: int) -> pd.DataFrame:
@@ -225,80 +257,67 @@ def main():
         print("❌ Aborted by user.")
         exit()
 
+    # ─────────────────────────────────────────────
+    # Load and process base table
+    # ─────────────────────────────────────────────
     df = load_entrada_df(file_path)
-    print(f"\n🔍 Pai values in T_Entradas for AnoMes {ano_mes}:")
-    print(df[df["AnoMes"] == ano_mes]["Pai"].dropna())
+    df_keep = df[df["AnoMes"] == ano_mes][["Pai", "CU_E", "CU_I", "Qt_I", "Qt_S"]].copy()
+    df_keep.reset_index(inplace=True)  # inclui o número da linha original como coluna
 
-    df = apply_prev_month_values(df, base_dir, year, month)
+    print(f"\n🔍 Pai values in T_Entradas for AnoMes BBB {ano_mes}:")
+    print(df_keep)
 
-    # Assign final columns for the current month
-    df.loc[df["AnoMes"] == ano_mes, "CU_I"] = df.loc[df["AnoMes"] == ano_mes, "CU_I_new"]
+    # Apply previous-month values (Qt_I and CU_I)
+    df = apply_prev_month_values(df_keep, base_dir, year, month)
+    #df.loc[df["AnoMes"] == ano_mes, "CU_I"] = df.loc[df["AnoMes"] == ano_mes, "CU_I_new"]
+    df_keep = df[["index", "Pai", "CU_E", "Qt_I", "CU_I_new"]].copy()
+    df_keep = df_keep.rename(columns={"CU_I_new": "CU_I"})
+    print(f"\n🔍 Pai values in T_Entradas for AnoMes CCC {ano_mes}:")
+    print(df_keep)
 
-    qtsp_df = calculate_qtsp_from_resumo(base_dir, year, month)
+    # ─────────────────────────────────────────────
+    # Calculate Qt_S from resumo
+    # ─────────────────────────────────────────────
+    prods_com_saida = calculate_qtsp_from_resumo(base_dir, year, month)
 
-    # 🧩 Debug: check which Pai match between T_Entradas and Qt_S summary
-    target_pais = df[df["AnoMes"] == ano_mes]["Pai"].dropna().astype(str).str.strip().unique()
-    print(f"\n🔍 Pai values in T_Entradas for AnoMes {ano_mes}: {list(target_pais)}")
+    print("\n Produtos com saidas: DDD")
+    print(prods_com_saida)
 
-    matching_qtsp = qtsp_df[qtsp_df["CODPP"].isin(target_pais)].copy()
-    #non_matching_qtsp = qtsp_df[~qtsp_df["Pai"].isin(target_pais)].copy()
+    # ─────────────────────────────────────────────
+    # Merge Qt_S into df (fill with 0 if missing)
+    # ─────────────────────────────────────────────
+    df = df_keep.merge(prods_com_saida, left_on="Pai", right_on="CODPP", how="left").fillna(0)
+    print(f"\n🔍 Pai values in T_Entradas for AnoMes EEE {ano_mes}:")
+    print(df)
 
-    print("\n✅ Matching Pai found in Qt_S summary:")
-    print(matching_qtsp if not matching_qtsp.empty else "⚠️ None found!")
+    # 🔄 Preparar Series com index = linha no Excel
+    cu_i_series = df.set_index("index")["CU_I"].round(3)
+    qt_i_series = df.set_index("index")["Qt_I"].round(3)
+    qt_s_series = df.set_index("index")["Qt_S"].round(3)
 
-    #print("\n❌ Non-matching Pai in Qt_S summary (first 20):")
-    #print(non_matching_qtsp.head(20))
+    # ─────────────────────────────────────────────
+    # Write values to Excel
+    # ─────────────────────────────────────────────
+    # 📝 Gravação no Excel
 
-    # Mapear valores de Qt_S baseados na coluna 'Pai'
-    qtsp_map = qtsp_df.set_index("CODPP")["Qt_S"].to_dict()
-    df["Qt_S"] = df["Pai"].map(qtsp_map)
-
-    # Make sure Pai is string in both DataFrame and values_series
-    df["Pai"] = df["Pai"].astype(str).str.strip()
-
-    #qtsp_series = qtsp_df.copy()
-    #qtsp_series["CODPP"] = qtsp_series["CODPP"].astype(str).str.strip()
-    #qtsp_series = qtsp_series.set_index("CODPP")["Qt_S"]
-
-    # 🔧 Normalize index before writing (avoid duplicate Pai and Series issues)
-    df_unique = (
-        df.loc[df["AnoMes"] == ano_mes, ["Pai", "CU_I_new", "Qt_I"]]
-        .dropna(subset=["Pai"])
-        .drop_duplicates(subset="Pai", keep="first")
-        .set_index("Pai")
-    )
-    df_unique["CU_I_new"] = df_unique["CU_I_new"].round(3)
-    df_unique["Qt_I"] = df_unique["Qt_I"].round(3)
-
-    # Debug
-    print("\n🧪 Debug preview before writing CU_I / Qt_I: - df_unique")
-    print(df_unique.head(20))
-
-    # Then use df_unique for both series:
-    written = write_column_to_excel(
+    written_cui = write_column_by_index_to_excel(
         df, excel_path=file_path, out_path=out_path,
-        ano_mes=ano_mes, column_name="CU_I",
-        values_series=df_unique["CU_I_new"]
+        column_name="CU_I",
+        values_series=cu_i_series
     )
+    print(f"✅ Wrote {written_cui} CU_I values for AnoMes {ano_mes}")
 
-    written_qtip = write_column_to_excel(
+    written_qtip = write_column_by_index_to_excel(
         df, excel_path=out_path, out_path=out_path,
-        ano_mes=ano_mes, column_name="Qt_I",
-        values_series=df_unique["Qt_I"]
+        column_name="Qt_I",
+        values_series=qt_i_series
     )
-
     print(f"✅ Wrote {written_qtip} Qt_I values for AnoMes {ano_mes}")
 
-    # Escrever no Excel
-    #print("\n📦 Debug Qt_S: valores a escrever:")
-    #print(qtsp_df[["Pai", "Qt_S"]].to_string(index=False))
-
-    written_qtsp = write_column_to_excel(
-        df, excel_path=out_path,
-        out_path=out_path,
-        ano_mes=ano_mes,
+    written_qtsp = write_column_by_index_to_excel(
+        df, excel_path=out_path, out_path=out_path,
         column_name="Qt_S",
-        values_series=qtsp_df.set_index("CODPP")["Qt_S"]
+        values_series=qt_s_series
     )
     print(f"✅ Wrote {written_qtsp} Qt_S values for AnoMes {ano_mes}")
 
