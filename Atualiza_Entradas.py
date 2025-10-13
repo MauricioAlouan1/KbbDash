@@ -110,9 +110,9 @@ def apply_qtip_values(df: pd.DataFrame, target_ano_mes: int, base_dir: str, year
     prev_df = load_previous_qtgerx(base_dir, prev_year, prev_month)
 
     df["Pai"] = df["Pai"].astype(str).str.strip()
-    prev_df["CodPP"] = prev_df["CodPP"].astype(str).str.strip()
+    prev_df["CODPP"] = prev_df["CODPP"].astype(str).str.strip()
 
-    df = df.merge(prev_df, left_on="Pai", right_on="CodPP", how="left")
+    df = df.merge(prev_df, left_on="Pai", right_on="CODPP", how="left")
     df["Qt_I"] = df["Qt_Ger"].fillna(0)
     return df
 
@@ -122,39 +122,62 @@ def calculate_qtsp_from_resumo(base_dir: str, year: int, month: int) -> pd.DataF
     print(f"Processando Saídas pro mês: {ano_mes}")
     vendas = []
 
-    if os.path.exists(resumo_path):
-        # O_NFCI
+    if not os.path.exists(resumo_path):
+        raise FileNotFoundError(f"❌ Arquivo não encontrado: {resumo_path}")
+
+    # ─────────────────────────────
+    # O_NFCI (vendas tipo B)
+    # ─────────────────────────────
+    try:
         df_nfci = pd.read_excel(resumo_path, sheet_name="O_NFCI")
         df_nfci["CODPP"] = df_nfci["CODPP"].astype(str).str.upper().str.strip()
-        df_nfci["QTD"] = pd.to_numeric(df_nfci["QTD"], errors="coerce").fillna(0)
+        df_nfci["QTD_B"] = pd.to_numeric(df_nfci["QTD"], errors="coerce").fillna(0)
         df_nfci["ANOMES"] = pd.to_numeric(df_nfci["ANOMES"], errors="coerce")
         df_nfci = df_nfci[df_nfci["ANOMES"] == ano_mes]
-        vendas.append(df_nfci[["CODPP", "QTD"]])
+        vendas.append(df_nfci[["CODPP", "QTD_B"]])
+    except Exception as e:
+        print(f"⚠️ Erro ao ler O_NFCI: {e}")
 
-        # L_LPI
+    # ─────────────────────────────
+    # L_LPI (vendas tipo C)
+    # ─────────────────────────────
+    try:
         df_lpi = pd.read_excel(resumo_path, sheet_name="L_LPI")
         df_lpi = df_lpi[df_lpi["STATUS PEDIDO"].astype(str).str.upper() != "CANCELADO"]
         df_lpi = df_lpi[df_lpi["EMPRESA"].astype(str).str.upper() == "K"]
         df_lpi["CODPP"] = df_lpi["CODPP"].astype(str).str.upper().str.strip()
-        df_lpi["QTD"] = pd.to_numeric(df_lpi["QTD"], errors="coerce").fillna(0)
+        df_lpi["QTD_C"] = pd.to_numeric(df_lpi["QTD"], errors="coerce").fillna(0)
         df_lpi["ANOMES"] = pd.to_numeric(df_lpi["ANOMES"], errors="coerce")
         df_lpi = df_lpi[df_lpi["ANOMES"] == ano_mes]
-        vendas.append(df_lpi[["CODPF", "QTD"]])
+        vendas.append(df_lpi[["CODPP", "QTD_C"]])
+    except Exception as e:
+        print(f"⚠️ Erro ao ler L_LPI: {e}")
 
     if not vendas:
-        raise ValueError(f"Nenhum dado de vendas encontrado para AnoMes {ano_mes} em 'O_NFCI' ou 'L_LPI'.")
+        raise ValueError(f"❌ Nenhum dado de vendas encontrado para AnoMes {ano_mes}.")
 
-    # Junta tudo
-    df_all = pd.concat(vendas, axis=0)
-    df_all = df_all.groupby("CODPP", as_index=False)["QTD"].sum().rename(columns={"QTD": "Qt_S"})
+    # ─────────────────────────────
+    # Concatenate and sum properly
+    # ─────────────────────────────
+    df_all = pd.concat(vendas, ignore_index=True)
 
-    df_all["CODPP"] = df_all["CODPP"].astype(str).str.upper().str.strip()
+    # unify column names before summing
+    if "QTD_B" not in df_all.columns:
+        df_all["QTD_B"] = 0
+    if "QTD_C" not in df_all.columns:
+        df_all["QTD_C"] = 0
 
-    # Agrupa por Pai
-    final_df = df_all.groupby("CODPP", as_index=False)["Qt_S"].sum()
-    print(final_df.head())
+    # group by product and sum totals
+    df_all = (
+        df_all.groupby("CODPP", as_index=False)[["QTD_B", "QTD_C"]]
+        .sum()
+        .assign(Qt_S=lambda x: x["QTD_B"] + x["QTD_C"])
+    )
 
-    return final_df
+    print(f"✅ {len(df_all)} produtos processados com Qt_S calculado.")
+    print(df_all.head())
+
+    return df_all[["CODPP", "Qt_S"]]
 
 def get_prev_month(year: int, month: int) -> tuple[int, int]:
     if month == 1:
@@ -171,7 +194,50 @@ def load_previous_qtgerx(base_dir: str, prev_year: int, prev_month: int) -> pd.D
     df["CODPP"] = df["CODPP"].astype(str).str.strip()
     df["Qt_Ger"] = pd.to_numeric(df["Qt_Ger"], errors="coerce").fillna(0)
     df["CU_F"] = pd.to_numeric(df["CU_F"], errors="coerce").fillna(0)
-    return df[["CodPP", "Qt_Ger", "CU_F"]]
+    return df[["CODPP", "Qt_Ger", "CU_F"]]
+
+def apply_prev_month_values(df: pd.DataFrame, base_dir: str, year: int, month: int) -> pd.DataFrame:
+    """
+    Fills Qt_I and CU_I_new based on previous month's Conc_Estoq_<tag>.xlsx.
+    - Qt_I = previous month's Qt_Ger
+    - CU_I_new = previous month's CU_F
+    - If not found: Qt_I = 0, CU_I_new = CU_E
+    """
+    import numpy as np
+
+    prev_year, prev_month = get_prev_month(year, month)
+    tag = f"{prev_year:04d}_{prev_month:02d}"
+    file_path = os.path.join(base_dir, "clean", tag, f"Conc_Estoq_{tag}.xlsx")
+
+    if not os.path.exists(file_path):
+        print(f"⚠️ Arquivo anterior não encontrado: {file_path}")
+        df["Qt_I"] = 0
+        df["CU_I_new"] = df["CU_E"]
+        return df
+
+    print(f"🔁 Lendo dados do mês anterior: {file_path}")
+    prev_df = pd.read_excel(file_path, sheet_name="Conc", dtype={"CODPP": str})
+    prev_df["CODPP"] = prev_df["CODPP"].astype(str).str.strip().str.upper()
+    prev_df["Qt_Ger"] = pd.to_numeric(prev_df["Qt_Ger"], errors="coerce").fillna(0)
+    prev_df["CU_F"]   = pd.to_numeric(prev_df["CU_F"], errors="coerce").fillna(0)
+
+    df["Pai"] = df["Pai"].astype(str).str.strip().str.upper()
+
+    # Merge both Qt_Ger and CU_F
+    df = df.merge(
+        prev_df[["CODPP", "Qt_Ger", "CU_F"]].rename(columns={"CU_F": "CU_F_prev", "Qt_Ger": "Qt_Ger_prev"}),
+        left_on="Pai", right_on="CODPP", how="left"
+    )
+
+    # Apply fallback logic for new items
+    df["Qt_I"] = np.where(df["Qt_Ger_prev"].notna(), df["Qt_Ger_prev"], 0)
+    df["CU_I_new"] = np.where(df["CU_F_prev"].notna() & (df["CU_F_prev"] > 0), df["CU_F_prev"], df["CU_E"])
+
+    print(f"✅ Aplicados valores do mês anterior para {df['Qt_Ger_prev'].notna().sum()} itens existentes.")
+    print(f"🆕 Itens novos com Qt_I=0 e CU_I=CU_E: {(df['Qt_Ger_prev'].isna()).sum()}")
+
+    return df
+
 
 # ─────────────────────────────────────────────────────────────
 # 4. Main logic
@@ -200,11 +266,12 @@ def main():
 
     df = load_entrada_df(file_path)
     print(f"\n🔍 Pai values in T_Entradas for AnoMes {ano_mes}:")
-    print(df[df["AnoMes"] == ano_mes]["Pai"].dropna().unique())
+    print(df[df["AnoMes"] == ano_mes]["Pai"].dropna())
 
-    df = apply_cupi_values(df, ano_mes)
-    df = apply_qtip_values(df, ano_mes, base_dir, year, month)
-    # Calcular Qt_S por Pai
+    df = apply_prev_month_values(df, base_dir, year, month)
+
+    # Assign final columns for the current month
+    df.loc[df["AnoMes"] == ano_mes, "CU_I"] = df.loc[df["AnoMes"] == ano_mes, "CU_I_new"]
 
     qtsp_df = calculate_qtsp_from_resumo(base_dir, year, month)
 
@@ -212,8 +279,8 @@ def main():
     target_pais = df[df["AnoMes"] == ano_mes]["Pai"].dropna().astype(str).str.strip().unique()
     print(f"\n🔍 Pai values in T_Entradas for AnoMes {ano_mes}: {list(target_pais)}")
 
-    matching_qtsp = qtsp_df[qtsp_df["Pai"].isin(target_pais)].copy()
-    non_matching_qtsp = qtsp_df[~qtsp_df["Pai"].isin(target_pais)].copy()
+    matching_qtsp = qtsp_df[qtsp_df["CODPP"].isin(target_pais)].copy()
+    #non_matching_qtsp = qtsp_df[~qtsp_df["Pai"].isin(target_pais)].copy()
 
     print("\n✅ Matching Pai found in Qt_S summary:")
     print(matching_qtsp if not matching_qtsp.empty else "⚠️ None found!")
@@ -222,33 +289,43 @@ def main():
     #print(non_matching_qtsp.head(20))
 
     # Mapear valores de Qt_S baseados na coluna 'Pai'
-    qtsp_map = qtsp_df.set_index("Pai")["Qt_S"].to_dict()
+    qtsp_map = qtsp_df.set_index("CODPP")["Qt_S"].to_dict()
     df["Qt_S"] = df["Pai"].map(qtsp_map)
-
-
-
 
     # Make sure Pai is string in both DataFrame and values_series
     df["Pai"] = df["Pai"].astype(str).str.strip()
 
     qtsp_series = qtsp_df.copy()
-    qtsp_series["Pai"] = qtsp_series["Pai"].astype(str).str.strip()
-    qtsp_series = qtsp_series.set_index("Pai")["Qt_S"]
+    qtsp_series["CODPP"] = qtsp_series["CODPP"].astype(str).str.strip()
+    qtsp_series = qtsp_series.set_index("CODPP")["Qt_S"]
 
-    qtsp_series = qtsp_df.copy()
-    qtsp_series["Pai"] = qtsp_series["Pai"].astype(str).str.strip()
-    qtsp_series = qtsp_series.set_index("Pai")["Qt_S"]
+    # 🔧 Normalize index before writing (avoid duplicate Pai and Series issues)
+    df_unique = (
+        df.loc[df["AnoMes"] == ano_mes, ["Pai", "CU_I_new", "Qt_I"]]
+        .dropna(subset=["Pai"])
+        .drop_duplicates(subset="Pai", keep="first")
+        .set_index("Pai")
+    )
+    df_unique["CU_I_new"] = df_unique["CU_I_new"].round(3)
+    df_unique["Qt_I"] = df_unique["Qt_I"].round(3)
 
+    # Debug
+    print("\n🧪 Debug preview before writing CU_I / Qt_I: - df_unique")
+    print(df_unique.head(20))
+
+    # Then use df_unique for both series:
     written = write_column_to_excel(
         df, excel_path=file_path, out_path=out_path,
-        ano_mes=ano_mes, column_name="CU_I", values_series=df["CU_I_new"]
+        ano_mes=ano_mes, column_name="CU_I",
+        values_series=df_unique["CU_I_new"]
     )
-    print(f"✅ Wrote {written} CU_I values for AnoMes {ano_mes}")    
- 
+
     written_qtip = write_column_to_excel(
         df, excel_path=out_path, out_path=out_path,
-        ano_mes=ano_mes, column_name="Qt_I", values_series=df["Qt_I"]
+        ano_mes=ano_mes, column_name="Qt_I",
+        values_series=df_unique["Qt_I"]
     )
+
     print(f"✅ Wrote {written_qtip} Qt_I values for AnoMes {ano_mes}")
 
     # Escrever no Excel
@@ -260,7 +337,7 @@ def main():
         out_path=out_path,
         ano_mes=ano_mes,
         column_name="Qt_S",
-        values_series=qtsp_df.set_index("Pai")["Qt_S"]
+        values_series=qtsp_df.set_index("CODPP")["Qt_S"]
     )
     print(f"✅ Wrote {written_qtsp} Qt_S values for AnoMes {ano_mes}")
 
