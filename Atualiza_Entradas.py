@@ -56,7 +56,7 @@ def load_entrada_df(file_path: str) -> pd.DataFrame:
 def apply_prev_month_values(df: pd.DataFrame, base_dir: str, year: int, month: int) -> pd.DataFrame:
     """
     Fills Qt_I and CU_I_new based on previous month's Conc_Estoq_<tag>.xlsx.
-    - Qt_I = previous month's Qt_Ger
+    - Qt_I = previous month's Qt_SS
     - CU_I_new = previous month's CU_F
     - If not found: Qt_I = 0, CU_I_new = CU_E
     """
@@ -75,23 +75,23 @@ def apply_prev_month_values(df: pd.DataFrame, base_dir: str, year: int, month: i
     print(f"🔁 Lendo dados do mês anterior: {file_path}")
     prev_df = pd.read_excel(file_path, sheet_name="Conc", dtype={"CODPP": str})
     prev_df["CODPP"] = prev_df["CODPP"].astype(str).str.strip().str.upper()
-    prev_df["Qt_Ger"] = pd.to_numeric(prev_df["Qt_Ger"], errors="coerce").fillna(0)
+    prev_df["Qt_SS"] = pd.to_numeric(prev_df["Qt_SS"], errors="coerce").fillna(0)
     prev_df["CU_F"]   = pd.to_numeric(prev_df["CU_F"], errors="coerce").fillna(0)
 
     df["Pai"] = df["Pai"].astype(str).str.strip().str.upper()
 
-    # Merge both Qt_Ger and CU_F
+    # Merge both Qt_SS and CU_F
     df = df.merge(
-        prev_df[["CODPP", "Qt_Ger", "CU_F"]].rename(columns={"CU_F": "CU_F_prev", "Qt_Ger": "Qt_Ger_prev"}),
+        prev_df[["CODPP", "Qt_SS", "CU_F"]].rename(columns={"CU_F": "CU_F_prev", "Qt_SS": "Qt_SS_prev"}),
         left_on="Pai", right_on="CODPP", how="left"
     )
 
     # Apply fallback logic for new items
-    df["Qt_I"] = np.where(df["Qt_Ger_prev"].notna(), df["Qt_Ger_prev"], 0)
+    df["Qt_I"] = np.where(df["Qt_SS_prev"].notna(), df["Qt_SS_prev"], 0)
     df["CU_I_new"] = np.where(df["CU_F_prev"].notna() & (df["CU_F_prev"] > 0), df["CU_F_prev"], df["CU_E"])
 
-    print(f"✅ Aplicados valores do mês anterior para {df['Qt_Ger_prev'].notna().sum()} itens existentes.")
-    print(f"🆕 Itens novos com Qt_I=0 e CU_I=CU_E: {(df['Qt_Ger_prev'].isna()).sum()}")
+    print(f"✅ Aplicados valores do mês anterior para {df['Qt_SS_prev'].notna().sum()} itens existentes.")
+    print(f"🆕 Itens novos com Qt_I=0 e CU_I=CU_E: {(df['Qt_SS_prev'].isna()).sum()}")
 
     return df
 
