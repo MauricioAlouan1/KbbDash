@@ -308,6 +308,8 @@ def lookup_cu_values(inventory_df, anomes):
                 ['Pai', 'Inv', 'AnoMes', 'CU_E', 'PGE', 'CU_I', 'CU_S', 'CU_F', 'Qt_E']
             ]
         )
+        last_cu_pai.loc[last_cu_pai["AnoMes"] != anomes, "Qt_E"] = 0
+
         print("\n[last_cu_pai] --- BBB")
         pd.set_option('display.max_columns', None)
         print(last_cu_pai)

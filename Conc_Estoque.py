@@ -47,7 +47,6 @@ OUTPUT_SUBDIR = "clean"
 # <<< HARD-CODE AQUI: nomes dos arquivos (prefixos) e tabela de Entradas
 INV_PREFIX      = "R_Estoq_fdm_"     # gera "R_Estoque_fdm_YYYY_MM.xlsx"
 RESUMO_PREFIX   = "R_Resumo_"          # gera "R_Resumo_YYYY_MM.xlsx"
-ENTRADAS_FILE   = "T_Entradas.xlsx"    # dentro de TABLES_DIR
 
 # <<< HARD-CODE AQUI: nomes das ABAS
 SHEET_PT01   = "PT01"
@@ -66,12 +65,6 @@ LLPI_QTY_COL     = "QTD"
 LLPI_STATUS_COL  = "STATUS PEDIDO"     # usado para filtrar != "CANCELADO"
 LLPI_EMPRESA_COL = "EMPRESA"           # usado para filtrar == "K"
 
-# T_Entradas (entradas do mês)
-ENTR_CODE_COL   = "Filho"              # ex.: "CODPF", "Pai"
-ENTRP_CODE_COL   = "Pai"              # ex.: "CODPF", "Pai"
-ENTR_QTY_COL    = "Qt_E"                 # ex.: "QT", "Qtde"
-ENTR_CU_COL     = "CU_E"                 # ex.: "CU" (se não tiver, use None)
-ENTR_CT_COL     = "CT_E"                 # ex.: "CT" (se não tiver, use None e calcula QT*CU)
 # Filtragem por mês:
 ENTR_ANOMES_COL = "AnoMes"             # yymm (ex.: 2507). Se não existir, use None.
 ENTR_DATE_COL   = None                 # OU nome da data (ex.: "Emissao" ou "Ultima Entrada") se preferir filtrar por data
