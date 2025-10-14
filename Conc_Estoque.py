@@ -58,7 +58,6 @@ SHEET_LLPI   = "L_LPI"
 # PT01 (estoque)
 
 # O_NFCI (vendas 2b)
-ONFCI_CODE_COL = "CODPF"               # ex.: "CODPF" ou "Código do Produto"
 ONFCI_QTY_COL  = "QTD"                  # ex.: "QT", "Quantidade", "QTD"
 
 # L_LPI (vendas 2c)
