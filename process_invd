@@ -141,13 +141,13 @@ def resolve_tables_dir(year: int, month: int) -> Path:
         raise FileNotFoundError(f"Pasta das Tabelas não encontrada: {p}")
     return p
 
-def create_pivot_sheet(wb, df, group_col, sheet_name, year, month):
+def create_pivot_sheet_pf(wb, df, group_col, sheet_name, year, month):
     number_format = '#,##0.00'
 
     print("Columns available in df:", df.columns.tolist())
 
     pivot_table = df.pivot_table(
-        index='CODPP',
+        index='CODPF',
         columns='Local',
         values='Qt',
         aggfunc='sum',
@@ -155,7 +155,7 @@ def create_pivot_sheet(wb, df, group_col, sheet_name, year, month):
     )
 
     pivot_table['Qt_SS'] = pivot_table.sum(axis=1)
-    pCT_F = df.groupby('CODPP')['CT_F'].sum()
+    pCT_F = df.groupby('CODPF')['CT_F'].sum()
     pivot_table['CT_F'] = pCT_F
     pivot_table['CU_F'] = pivot_table['CT_F'] / pivot_table['Qt_SS']
     pivot_table['AnoMes'] = (year % 100) * 100 + month
@@ -199,6 +199,87 @@ def create_pivot_sheet(wb, df, group_col, sheet_name, year, month):
 
     ws.auto_filter.ref = ws.dimensions
 
+from openpyxl.styles import Font, PatternFill
+
+from openpyxl.styles import Font, PatternFill
+
+def create_pivot_sheet_pp(wb, df, group_col, sheet_name, year, month):
+    number_format = '#,##0.00'
+
+    print("Columns available in df:", df.columns.tolist())
+
+    # --- Pivot base quantities ---
+    pivot_table = df.pivot_table(
+        index='CODPP',
+        columns='Local',
+        values='Qt',
+        aggfunc='sum',
+        fill_value=0
+    )
+
+    # --- Derived totals ---
+    pivot_table['Qt_SS'] = pivot_table.sum(axis=1)
+
+    # --- Aggregate costs ---
+    pCT_F = df.groupby('CODPP')['CT_F'].sum()
+    pivot_table['CT_F'] = pCT_F
+    pivot_table['CU_F'] = pivot_table['CT_F'] / pivot_table['Qt_SS']
+
+    pivot_table['AnoMes'] = (year % 100) * 100 + month
+
+    # --- Add entry and sales info (same formulas as your original) ---
+    pQt_E = df.groupby('CODPP')['Qt_E'].mean()
+    pCU_E = df.groupby('CODPP')['CU_E'].mean()
+    pivot_table['Qt_E'] = pQt_E
+    pivot_table['CU_E'] = pCU_E.round(2)
+    pivot_table['CT_E'] = (pivot_table['CU_E'] * pivot_table['Qt_E']).round(2)
+    pCU_S = df.groupby('CODPP')['CU_S'].mean()
+    pivot_table['CU_S'] = pCU_S.round(2)
+
+    pivot_table = pivot_table.reset_index()
+
+    # --- Create or reuse sheet ---
+    if sheet_name not in wb.sheetnames:
+        wb.create_sheet(title=sheet_name)
+    ws = wb[sheet_name]
+
+    # --- Write headers ---
+    for col_idx, header in enumerate(pivot_table.columns, start=1):
+        ws.cell(row=1, column=col_idx, value=header).font = Font(bold=True)
+
+    # --- Write data ---
+    for r_idx, row in enumerate(pivot_table.itertuples(index=False), start=2):
+        for c_idx, value in enumerate(row, start=1):
+            ws.cell(row=r_idx, column=c_idx, value=value)
+
+    # --- Totals row ---
+    totals_row_idx = len(pivot_table) + 2
+    ws.cell(row=totals_row_idx, column=1, value="Grand Total").font = Font(bold=True)
+    for col_idx, col_name in enumerate(pivot_table.columns[1:], start=2):
+        total_value = pivot_table[col_name].sum()
+        cell = ws.cell(row=totals_row_idx, column=col_idx, value=total_value)
+        cell.font = Font(bold=True)
+        if col_name in ['CT_F', 'CU_F', 'Qt_E', 'CU_E', 'CT_E', 'CU_S']:
+            cell.number_format = number_format
+
+    # --- Column styling ---
+    gray_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+    blue_fill = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
+
+    gray_cols = ['Qt_SS', 'CT_F', 'CU_F']
+    blue_cols = ['Qt_E', 'CU_E', 'CT_E', 'CU_S']
+
+    for col_name in gray_cols + blue_cols:
+        if col_name in pivot_table.columns:
+            col_idx = pivot_table.columns.get_loc(col_name) + 1
+            for row in range(2, totals_row_idx + 1):
+                cell = ws.cell(row=row, column=col_idx)
+                cell.font = Font(bold=True)
+                cell.fill = gray_fill if col_name in gray_cols else blue_fill
+                cell.number_format = number_format
+
+    ws.auto_filter.ref = ws.dimensions
+    print(f"✅ Created pivot sheet '{sheet_name}' (formatting only; logic unchanged).")
 
 # Function to lookup CU values and additional columns
 # Function to lookup CU values and additional columns
@@ -320,12 +401,12 @@ def add_pivot_by_filho(output_filepath, df, year, month):
     ws.auto_filter.ref = ws.dimensions
 
     # Criar aba PT01 (por SKU)
-    create_pivot_sheet(wb, df, group_col='CODPF', sheet_name='PT01', year=year, month=month)
+    create_pivot_sheet_pf(wb, df, group_col='CODPF', sheet_name='PT01', year=year, month=month)
     wb.save(output_filepath)
 
 def add_pivot_by_pai(output_filepath, df, year, month):
     wb = load_workbook(output_filepath)
-    create_pivot_sheet(wb, df, group_col='CODPP', sheet_name='PT_pp', year=year, month=month)
+    create_pivot_sheet_pp(wb, df, group_col='CODPP', sheet_name='PT_pp', year=year, month=month)
     wb.save(output_filepath)
 
 

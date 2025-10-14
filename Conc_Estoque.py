@@ -160,7 +160,7 @@ def load_prodf(tables_dir: Path) -> pd.DataFrame:
 def load_curr_inventory_data(file_path: Path) -> pd.DataFrame:
     from openpyxl import load_workbook
     wb = load_workbook(file_path, data_only=True)
-    ws = wb["Data"]
+    ws = wb["PT_pp"]
     df = pd.DataFrame(ws.values)
     df.columns = df.iloc[0]
     df = df.drop(index=0)
@@ -180,9 +180,9 @@ def load_prev_inventory_data(file_path: Path) -> pd.DataFrame:
 
     # --- Load evaluated values ---
     wb = load_workbook(file_path, data_only=True)
-    if "Conc" not in wb.sheetnames:
-        raise ValueError("❌ Sheet 'Conc' not found in previous inventory file.")
-    ws = wb["Conc"]
+    if "PT_pp" not in wb.sheetnames:
+        raise ValueError("❌ Sheet 'PT_pp' not found in previous inventory file.")
+    ws = wb["PT_pp"]
 
     data = list(ws.values)
     if not data:
@@ -204,7 +204,7 @@ def load_prev_inventory_data(file_path: Path) -> pd.DataFrame:
         print(f"✅ Using code column: {code_col}")
 
     # Map expected columns safely
-    for src_col, dst_col in [("Qt_Ger", "Qt_I"), ("CT_Ger", "CT_I"), ("CU_F", "CU_I")]:
+    for src_col, dst_col in [("Qt_SS", "Qt_I"), ("CT_F", "CT_I"), ("CU_F", "CU_I")]:
         if src_col not in df.columns:
             print(f"⚠️ Missing expected column '{src_col}' in previous inventory file.")
             df[dst_col] = 0
@@ -231,18 +231,8 @@ def load_sales_onfci(resumo_path: Path) -> pd.DataFrame:
 
     print(f"🟢 Loading sales O_NFCI from: {resumo_path}")
 
-    wb = load_workbook(resumo_path, data_only=True)
-    if "O_NFCI" not in wb.sheetnames:
-        raise ValueError("❌ Sheet 'O_NFCI' not found in Resumo file.")
-    ws = wb["O_NFCI"]
-
-    data = list(ws.values)
-    if not data:
-        raise ValueError("❌ No data found in sheet 'O_NFCI'.")
-
-    # First row = headers
-    headers = [str(h).strip() if h is not None else "" for h in data[0]]
-    df = pd.DataFrame(data[1:], columns=headers)
+    print(f"🟢 Loading sales O_NFCI from: {resumo_path}")
+    df = pd.read_excel(resumo_path, sheet_name="O_NFCI", dtype=str)
 
     # Remove total rows
     if "CODPP" in df.columns:
@@ -272,39 +262,35 @@ def load_sales_onfci(resumo_path: Path) -> pd.DataFrame:
 
 def load_sales_llpi(resumo_path: Path) -> pd.DataFrame:
     """
-    Load L_LPI sales sheet (2c) reading evaluated formula results.
+    Load L_LPI sales sheet (2c) using pandas for speed and stability.
     Cleans GRAND TOTAL rows and applies fixed filters.
     """
-    from openpyxl import load_workbook
     import pandas as pd
 
     print(f"🟣 Loading sales L_LPI from: {resumo_path}")
 
-    # --- Load evaluated formula results ---
-    wb = load_workbook(resumo_path, data_only=True)
-    if SHEET_LLPI not in wb.sheetnames:
-        raise ValueError(f"❌ Sheet '{SHEET_LLPI}' not found in Resumo file.")
-    ws = wb[SHEET_LLPI]
+    try:
+        df = pd.read_excel(resumo_path, sheet_name="L_LPI", dtype=str)
+    except Exception as e:
+        print(f"❌ Error reading L_LPI sheet: {e}")
+        return pd.DataFrame()
 
-    data = list(ws.values)
-    if not data:
-        raise ValueError(f"❌ No data found in sheet '{SHEET_LLPI}'.")
+    if df.empty:
+        print("⚠️ L_LPI sheet is empty.")
+        return df
 
-    # First row is headers
-    headers = [str(h).strip() if h is not None else "" for h in data[0]]
-    df = pd.DataFrame(data[1:], columns=headers)
-
-    # Remove total rows
+    # Clean GRAND TOTAL rows
     if "CODPP" in df.columns:
         df = df[df["CODPP"].astype(str).str.upper() != "GRAND TOTAL"]
 
-    # --- Apply filters (CANCELADO, EMPRESA == K) ---
-    df = df[df[LLPI_STATUS_COL].astype(str).str.upper() != "CANCELADO"]
-    df = df[df[LLPI_EMPRESA_COL].astype(str).str.upper() == "K"]
+    # Apply filters
+    if "STATUS PEDIDO" in df.columns and "EMPRESA" in df.columns:
+        df = df[df["STATUS PEDIDO"].astype(str).str.upper() != "CANCELADO"]
+        df = df[df["EMPRESA"].astype(str).str.upper() == "K"]
 
-    # --- Normalize and convert numerics ---
-    df["CODPP"] = df[LLPI_CODE_COL].astype(str).str.strip().str.upper()
-    df["QTD"] = pd.to_numeric(df.get(LLPI_QTY_COL, 0), errors="coerce").fillna(0)
+    # Normalize and convert numerics
+    df["CODPP"] = df["CODPP"].astype(str).str.strip().str.upper()
+    df["QTD"] = pd.to_numeric(df.get("QTD", 0), errors="coerce").fillna(0)
     df["VLRVENDA"] = pd.to_numeric(df.get("VLRVENDA", 0), errors="coerce").fillna(0)
     df["MargVlr"] = pd.to_numeric(df.get("MargVlr", 0), errors="coerce").fillna(0)
 
@@ -315,7 +301,6 @@ def load_sales_llpi(resumo_path: Path) -> pd.DataFrame:
         "Mrg_2c": df["MargVlr"]
     })
 
-    # --- Aggregate by product code ---
     lpi_out = out.groupby("CODPP", as_index=False).agg({
         "VENDAS_2c": "sum",
         "VV_2c": "sum",
@@ -324,7 +309,6 @@ def load_sales_llpi(resumo_path: Path) -> pd.DataFrame:
 
     print(f"📦 Loaded {len(lpi_out)} L_LPI rows (after filters & cleaning)")
     return lpi_out
-
 # -----------------------
 # Main reconciliation
 # -----------------------
@@ -348,7 +332,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     prev_dir   = resolve_month_dir(prev_y, prev_m)
     tables_dir = resolve_tables_dir(year, month)
 
-    prev_inv_path = find_existing_excel(prev_dir, f"Conc_Estoq_{prev_tag}")
+    prev_inv_path = find_existing_excel(prev_dir, f"{INV_PREFIX}{prev_tag}")
     this_inv_path = find_existing_excel(this_dir,  f"{INV_PREFIX}{this_tag}")
     resumo_path   = find_existing_excel(this_dir,  f"{RESUMO_PREFIX}{this_tag}")
 
@@ -413,7 +397,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
         dp["CU_S"] = dp.get("CU_F", 0)
 
     dp["CT_S"]  = (dp.get("CU_S", 0) * dp.get("Qt_S", 0)).round(2)
-    dp["CT_E"]  = (dp.get("CU_E", 0) * dp.get("Qt_E", 0)).round(2)
+    dp["CT_E"]  = (dp.get("CU_E", 0) * dp.get("Qt_E", 0))
     dp["CT_SE"] = (dp.get("CT_I", 0) + dp["CT_E"] - dp["CT_S"]).round(2)
     dp["CT_SS"] = (dp.get("Qt_SS", 0) * dp.get("CU_F", 0)).round(2)
 
@@ -421,9 +405,9 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     dp["Qt_Diff"] = dp.get("Qt_SS", 0) - dp["Qt_SE"]
 
     # inicializa gerado SEM filtrar por Ins
-    dp["Qt_Ger"] = np.where(dp["Qt_Diff"] == 0, dp.get("Qt_SS", 0), np.nan)
+    #dp["Qt_Ger"] = np.where(dp["Qt_Diff"] == 0, dp.get("Qt_SS", 0), np.nan)
     dp["CT_Diff"] = (dp["CT_SS"] - dp["CT_SE"]).round(2)
-    dp["CT_Ger"]  = np.where(dp["Qt_Diff"] == 0, dp["CT_SS"], dp["CT_SE"])  # evita NaN
+    #dp["CT_Ger"]  = np.where(dp["Qt_Diff"] == 0, dp["CT_SS"], dp["CT_SE"])  # evita NaN
 
     # Ins agora calculado na base unificada (não só em inv_this)
     prodf_parts = prodf["CODPP"].drop_duplicates()
@@ -437,8 +421,8 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
 
     final_cols_order = [
         "CODPP", "Ins",
-        "Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS", "Qt_Diff", "Qt_Ger",
-        "CT_I", "CT_E", "CT_S", "CT_SE", "CT_SS", "CT_Diff", "CT_Ger",
+        "Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS", "Qt_Diff", #"Qt_Ger",
+        "CT_I", "CT_E", "CT_S", "CT_SE", "CT_SS", "CT_Diff", #"CT_Ger",
         "CU_I", "CU_E", "CU_S", "CU_F",
         "VENDAS_2b", "VENDAS_2c", "VENDAS_tot",
         "VV_2b", "VV_2c", "VV_tot",
@@ -448,6 +432,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     ]
     dp = dp[[c for c in final_cols_order if c in dp.columns]]
     return dp
+
 def apply_excel_formatting(ws, df, wb):
     """Apply column widths and styles to an Excel worksheet."""
     col_widths = {
@@ -667,55 +652,31 @@ def adjust_missing_inventory_budget(dp):
     print(f"💰 Total cost of goods sold (CT_S): {total_ct_s:,.2f}")
     print(f"🎯 Budget range: ±{budget_limit:,.2f}")
 
-    # Pending = valid diff rows
-    pending = dp.dropna(subset=["CU_F", "Qt_Diff"]).copy()
-    pending["CT_DiffVal"] = pending["Qt_Diff"] * pending["CU_F"]
+    # --- Step 1. Compute difference for Ins = "I" items ---
+    pDiff = dp.loc[dp["Ins"] != "I", "CT_Diff"].sum(skipna=True)
+    print(f"📊 Total CT_Diff for Ins!='I': {pDiff:,.2f}")
 
-    pos = pending[pending["Qt_Diff"] > 0]
-    neg = pending[pending["Qt_Diff"] < 0]
+    # --- Step 2. Determine how much we can adjust (smaller of budget or diff) ---
+    pAdjust = np.sign(pDiff) * min(abs(pDiff), budget_limit)
+    print(f"⚖️ Difference value: {pDiff:,.2f}")
+    print(f"💵 Will adjust by (limited to budget): {pAdjust:,.2f}")
 
-    total_pos = (pos["Qt_Diff"] * pos["CU_F"]).sum()
-    total_neg = (neg["Qt_Diff"] * neg["CU_F"]).sum()  # negative
-    print(f"➕ Positive side total: {total_pos:,.2f}")
-    print(f"➖ Negative side total: {total_neg:,.2f}")
-
-    # Step 2. Neutralize smaller side and get remaining imbalance
-    offset_value = min(abs(total_pos), abs(total_neg))
-    imbalance = total_pos + total_neg  # this is net imbalance (can be + or -)
-    print(f"⚖️ Natural offset applied (no budget impact): {offset_value:,.2f}")
-    print(f"📊 Remaining imbalance (after offset): {imbalance:,.2f}")
-
-    # Step 3. Calculate available adjustment amount (within budget)
-    remaining_budget = budget_limit + offset_value
-    adj_value = np.clip(imbalance, -remaining_budget, remaining_budget)
-    print(f"💵 Budget available for adjustment: {remaining_budget:,.2f}")
-    print(f"✅ Adjustment value to apply: {adj_value:,.2f}")
-
-    # --- Step 4. Apply or create 'Ajuste_Estoque' record ---
-    if "Ajuste_Estoque" not in dp["CODPP"].values:
+    # --- Step 3. Apply or create 'Ajuste_Estoque' record ---
+    if "Ajuste_Estoque" in dp["CODPP"].values:
+        idx_adj = dp.index[dp["CODPP"] == "Ajuste_Estoque"][0]
+        dp.at[idx_adj, "CT_SS"] = dp.get("CT_SS", pd.Series(0, index=dp.index)).iloc[idx_adj] + pAdjust
+        print(f"🔁 Updated existing 'Ajuste_Estoque' CT_SS → {dp.at[idx_adj, 'CT_SS']:,.2f}")
+    else:
         print("🆕 Creating 'Ajuste_Estoque' item in dataset...")
         new_row = {
             "CODPP": "Ajuste_Estoque",
-            "Qt_I": 0, "Qt_E": 0.0, "Qt_S": 0.0, "Qt_SE": 0.0,
-            "CT_I": 0, "CT_E": 0.0, "CT_S": 0.0, "CT_SE": 0.0,
+            "Qt_I": 0.0, "Qt_E": 0.0, "Qt_S": 0.0, "Qt_SE": 0.0,
+            "CT_I": 0.0, "CT_E": 0.0, "CT_S": 0.0, "CT_SE": 0.0,
             "CU_F": 0.0,
-            "Qt_Ger": 0.0, "CT_Ger": 0.0
+            "CT_SS": pAdjust, "CT_Diff": -pAdjust
         }
         dp = pd.concat([dp, pd.DataFrame([new_row])], ignore_index=True)
-
-    idx_adj = dp.index[dp["CODPP"] == "Ajuste_Estoque"][0]
-
-    # Ensure columns exist
-    for c in ["CT_Ger", "Qt_Ger"]:
-        if c not in dp.columns:
-            dp[c] = 0.0
-
-    # Apply adjustment in CT_Ger (value only)
-    dp.at[idx_adj, "CT_Ger"] = dp.get("CT_Ger", pd.Series(0, index=dp.index)).iloc[idx_adj] + adj_value
-    dp.at[idx_adj, "Qt_Ger"] = 0.0  # purely value-based
-
-    print(f"📦 'Ajuste_Estoque' CT_Ger now: {dp.at[idx_adj, 'CT_Ger']:,.2f}")
-    print("✅ Adjustment completed successfully.")
+        print(f"✅ Inserted new 'Ajuste_Estoque' with CT_SS = {pAdjust:,.2f}")
 
     return dp
 
