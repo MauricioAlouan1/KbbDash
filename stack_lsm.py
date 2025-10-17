@@ -10,7 +10,7 @@ import psutil  # To check memory usage
 # Global variables
 timeframe = 6  # Default: Last 6 months
 ano_x = 2025
-mes_x = 4
+mes_x = 10
 
 # Define potential base directories
 path_options = [
