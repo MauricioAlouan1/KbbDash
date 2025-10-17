@@ -6,10 +6,11 @@ from openpyxl import load_workbook
 
 # Run processing for all series for a specific month
 YEAR = "2025"
-MONTH = "9-Setembro"
+MONTH = "10-Outubro"
 
 # Define base folder and available series
-BASE_FOLDER = "/Users/mauricioalouan/Dropbox/nfs"
+#BASE_FOLDER = "/Users/mauricioalouan/Dropbox/nfs"
+BASE_FOLDER = "/Users/simon/Library/CloudStorage/Dropbox/nfs"
 SERIES_LIST = [
     "Serie 1 - Omie",
     "Serie 2 - filial",
