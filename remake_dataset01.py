@@ -180,6 +180,25 @@ column_format_dict = {
         'A RECEBER': '#,##0.00',
         'DATA BASE': 'DD-MMM-YY',  
     },
+    'Kon_Detail_SKUAdj': {
+        'Venda': '#,##0.00',
+        'QTD': '#,##0',
+        'Taxa_dir': '#,##0.00',
+        'Frete_dir': '#,##0.00',
+        'Outros_dir': '#,##0.00',
+        'TotDesc_dir': '#,##0.00',
+        'Taxa_ind': '#,##0.00',
+        'Frete_ind': '#,##0.00',
+        'Outros_ind': '#,##0.00',
+        'TotDesc_ind': '#,##0.00',
+        'Taxa_tot': '#,##0.00',
+        'Frete_tot': '#,##0.00',
+        'Outros_tot': '#,##0.00',
+        'TotDesc_tot': '#,##0.00',
+        'ECU': '#,##0.00',
+        'Marg_vlr': '#,##0.00',
+        'Marg_pct': '0.0%'
+    }
 }
 rows_todrop = {
     'O_NFCI': {
@@ -311,6 +330,385 @@ def clean_dataframes(all_data):
 
     return all_data
 
+def build_Kon_Report1(all_data):
+    """Generate a pivoted Kon report with totals and percentage rows."""
+    if "Kon_RelGeral" not in all_data:
+        print("⚠️ Kon_RelGeral not found. Skipping summary.")
+        return all_data
+
+    df = all_data["Kon_RelGeral"].copy()
+    required_cols = ["CANAL", "VALOR_REPASSE", "Kon_Gr", "Kon_SGr"]
+    for c in required_cols:
+        if c not in df.columns:
+            print(f"⚠️ Missing column {c} in Kon_RelGeral. Skipping summary.")
+            return all_data
+
+    # --- filter out unwanted groups ---
+    df = df[~df["Kon_Gr"].isin(["Saldo", "Saque"])]
+
+    # --- aggregate ---
+    pivot = (
+        df.groupby(["Kon_Gr", "Kon_SGr", "CANAL"], as_index=False)["VALOR_REPASSE"]
+          .sum()
+    )
+
+    # --- pivot channels into columns ---
+    pivot = pivot.pivot_table(
+        index=["Kon_Gr", "Kon_SGr"],
+        columns="CANAL",
+        values="VALOR_REPASSE",
+        aggfunc="sum",
+        fill_value=0
+    ).reset_index()
+
+    # --- ensure fixed channel columns ---
+    channel_order = ["Amazon", "Magazine Luiza", "Mercado Livre", "Shopee"]
+    for ch in channel_order:
+        if ch not in pivot.columns:
+            pivot[ch] = 0
+
+    # --- reorder columns and add TOTAL ---
+    pivot = pivot[["Kon_Gr", "Kon_SGr"] + channel_order]
+    pivot["TOTAL"] = pivot[channel_order].sum(axis=1)
+
+    # --- enforce logical order ---
+    order_main = ["Venda", "Taxa-Comissao", "Frete", "Outros"]
+    order_sub = ["Bloq-Desbloq", "Devolucao", "Full", "Mkt", "Promo-Rebate", "Impostos Retidos"]
+    pivot["Kon_Gr"] = pd.Categorical(pivot["Kon_Gr"], categories=order_main, ordered=True)
+    pivot["Kon_SGr"] = pd.Categorical(pivot["Kon_SGr"], categories=order_sub, ordered=True)
+    pivot = pivot.sort_values(["Kon_Gr", "Kon_SGr"], na_position="last").reset_index(drop=True)
+
+    # --- add totals per Kon_Gr (summing all subgroups) ---
+    totals_by_group = (
+        pivot.groupby("Kon_Gr")[channel_order + ["TOTAL"]].sum().reset_index()
+    )
+    totals_by_group["Kon_SGr"] = ""
+    pivot = pd.concat([pivot, totals_by_group], ignore_index=True)
+
+    # --- compute overall totals ---
+    venda_tot   = totals_by_group[totals_by_group["Kon_Gr"] == "Venda"][channel_order + ["TOTAL"]].sum()
+    taxa_tot    = totals_by_group[totals_by_group["Kon_Gr"] == "Taxa-Comissao"][channel_order + ["TOTAL"]].sum()
+    frete_tot   = totals_by_group[totals_by_group["Kon_Gr"] == "Frete"][channel_order + ["TOTAL"]].sum()
+    outros_tot  = totals_by_group[totals_by_group["Kon_Gr"] == "Outros"][channel_order + ["TOTAL"]].sum()
+
+    # --- create bottom summary rows ---
+    venda_liq = venda_tot - (taxa_tot + frete_tot + outros_tot)
+
+    pct_rows = pd.DataFrame([
+        ["Venda Líquida", "", *venda_liq.values],
+        ["Taxa_pct", "", *(taxa_tot.values / venda_tot.values * 100)],
+        ["Frete_pct", "", *(frete_tot.values / venda_tot.values * 100)],
+        ["Outros_pct", "", *(outros_tot.values / venda_tot.values * 100)],
+        ["Liquido_pct", "", *(venda_liq.values / venda_tot.values * 100)]
+    ], columns=["Kon_Gr", "Kon_SGr"] + channel_order + ["TOTAL"])
+
+    # --- concatenate report ---
+    final_report = pd.concat([pivot, pct_rows], ignore_index=True)
+
+    all_data["Kon_Report1"] = final_report
+    print(f"✅ Kon_Report1 created with shape: {final_report.shape}")
+    return all_data
+
+def build_Kon_Report_from_df(df, name="Kon_Report_Custom"):
+    """
+    Generic version of build_Kon_Report1 that accepts a dataframe directly.
+    Produces a pivoted report grouped by Kon_Gr, Kon_SGr, and CANAL.
+    """
+    required_cols = ["CANAL", "VALOR_REPASSE", "Kon_Gr", "Kon_SGr"]
+    for c in required_cols:
+        if c not in df.columns:
+            print(f"⚠️ Missing column {c} in input for {name}. Skipping.")
+            return pd.DataFrame()
+
+    df = df[~df["Kon_Gr"].isin(["Saldo", "Saque"])]
+
+    pivot = (
+        df.groupby(["Kon_Gr", "Kon_SGr", "CANAL"], as_index=False)["VALOR_REPASSE"]
+          .sum()
+    )
+
+    pivot = pivot.pivot_table(
+        index=["Kon_Gr", "Kon_SGr"],
+        columns="CANAL",
+        values="VALOR_REPASSE",
+        aggfunc="sum",
+        fill_value=0
+    ).reset_index()
+
+    channel_order = ["Amazon", "Magazine Luiza", "Mercado Livre", "Shopee"]
+    for ch in channel_order:
+        if ch not in pivot.columns:
+            pivot[ch] = 0
+
+    pivot = pivot[["Kon_Gr", "Kon_SGr"] + channel_order]
+    pivot["TOTAL"] = pivot[channel_order].sum(axis=1)
+    pivot["Report_Name"] = name
+
+    print(f"✅ {name} created with shape: {pivot.shape}")
+    return pivot
+
+def allocate_nosku_deductions(all_data):
+    """
+    Build non-SKU report, compute deduction ratios per marketplace,
+    and redistribute deductions across SKU-valid lines.
+    Creates:
+      - Kon_Report_NoSKU   : summary for unmatched transactions
+      - Kon_Report_SKUAdj  : SKU-level report with allocated deductions
+      - Kon_Ratios         : summary of per-marketplace ratios
+    """
+    if "Kon_RelGeral" not in all_data:
+        print("⚠️ Kon_RelGeral not found. Skipping allocation.")
+        return all_data
+
+    df = all_data["Kon_RelGeral"].copy()
+    if "CODPP" not in df.columns:
+        print("⚠️ CODPP column missing. Cannot flag SKU validity.")
+        return all_data
+
+    # --- flag valid vs invalid SKU lines ---
+    df["VALID_SKU"] = df["CODPP"].astype(str).str.strip().ne("")
+
+    df_valid = df[df["VALID_SKU"] == True].copy()
+    df_non   = df[df["VALID_SKU"] == False].copy()
+
+    # --- build non-SKU report ---
+    rep_non = build_Kon_Report_from_df(df_non, name="Kon_Report_NoSKU")
+    all_data["Kon_Report_NoSKU"] = rep_non
+
+    # --- calculate deduction ratios per CANAL ---
+    channel_order = ["Amazon", "Magazine Luiza", "Mercado Livre", "Shopee"]
+    ratios = {}
+
+    for canal in channel_order:
+        df_canal = df_non[df_non["CANAL"] == canal]
+        if df_canal.empty:
+            ratios[canal] = {"Taxa_pct": 0, "Frete_pct": 0, "Outros_pct": 0}
+            continue
+
+        rep_canal = build_Kon_Report_from_df(df_canal, name=f"Kon_NoSKU_{canal}")
+        agg = rep_canal.groupby("Kon_Gr")[["TOTAL"]].sum()
+
+        venda_tot  = agg.loc["Venda"]["TOTAL"] if "Venda" in agg.index else 1
+        taxa_tot   = agg.loc["Taxa-Comissao"]["TOTAL"] if "Taxa-Comissao" in agg.index else 0
+        frete_tot  = agg.loc["Frete"]["TOTAL"] if "Frete" in agg.index else 0
+        outros_tot = agg.loc["Outros"]["TOTAL"] if "Outros" in agg.index else 0
+
+        ratios[canal] = {
+            "Taxa_pct":  taxa_tot / venda_tot,
+            "Frete_pct": frete_tot / venda_tot,
+            "Outros_pct": outros_tot / venda_tot,
+        }
+
+    # --- print summary of ratios ---
+    print("💡 Non-SKU ratios by marketplace:")
+    for canal, vals in ratios.items():
+        print(f"   {canal}: {vals}")
+
+    # --- apply per-marketplace ratios to valid SKUs ---
+    df_valid["Taxa_val"] = 0.0
+    df_valid["Frete_val"] = 0.0
+    df_valid["Outros_val"] = 0.0
+
+    for canal, pct in ratios.items():
+        mask = df_valid["CANAL"] == canal
+        df_valid.loc[mask, "Taxa_val"]  = -df_valid.loc[mask, "VALOR_REPASSE"] * pct["Taxa_pct"]
+        df_valid.loc[mask, "Frete_val"] = -df_valid.loc[mask, "VALOR_REPASSE"] * pct["Frete_pct"]
+        df_valid.loc[mask, "Outros_val"]= -df_valid.loc[mask, "VALOR_REPASSE"] * pct["Outros_pct"]
+
+    # --- compute net adjusted repasse ---
+    df_valid["VALOR_REPASSE_LIQ"] = (
+        df_valid["VALOR_REPASSE"]
+        + df_valid["Taxa_val"]
+        + df_valid["Frete_val"]
+        + df_valid["Outros_val"]
+    )
+
+    # --- store adjusted detail table ---
+    all_data["Kon_RelGeral_SKUAdj"] = df_valid
+
+    # --- build SKU-adjusted report summary ---
+    rep_sku = build_Kon_Report_from_df(df_valid, name="Kon_Report_SKUAdj")
+    all_data["Kon_Report_SKUAdj"] = rep_sku
+
+    # --- build ratio summary for audit ---
+    ratio_rows = []
+    for canal, vals in ratios.items():
+        ratio_rows.append({
+            "CANAL": canal,
+            "Taxa_pct": vals["Taxa_pct"],
+            "Frete_pct": vals["Frete_pct"],
+            "Outros_pct": vals["Outros_pct"],
+            "Total_pct": vals["Taxa_pct"] + vals["Frete_pct"] + vals["Outros_pct"],
+        })
+    df_ratios = pd.DataFrame(ratio_rows)
+    all_data["Kon_Ratios"] = df_ratios
+
+    print(f"✅ Allocation completed. Added sheets: Kon_Report_NoSKU, Kon_Report_SKUAdj, Kon_Ratios")
+    return all_data
+
+def add_unmapped_skus(all_data):
+    """
+    Aggregate unmapped sales per channel and create synthetic 'UNMAPPED' SKUs.
+    Uses mapped SKUs to estimate avg ticket and cost ratio for each channel.
+    Appends one synthetic SKU row per channel to Kon_RelGeral for full reconciliation.
+    """
+    if "Kon_RelGeral" not in all_data or "T_ProdF" not in all_data:
+        print("⚠️ Kon_RelGeral or T_ProdF not found. Skipping unmapped synthesis.")
+        return all_data
+
+    df = all_data["Kon_RelGeral"].copy()
+
+    # --- Flag valid vs invalid SKU lines ---
+    df["VALID_SKU"] = df["CODPP"].astype(str).str.strip().ne("")
+
+    df_valid = df[df["VALID_SKU"] == True].copy()
+    df_unmapped = df[df["VALID_SKU"] == False].copy()
+
+    if df_unmapped.empty:
+        print("✅ No unmapped sales found. Nothing to synthesize.")
+        all_data["Kon_RelGeral"] = df
+        return all_data
+
+    channel_order = ["Amazon", "Magazine Luiza", "Mercado Livre", "Shopee"]
+    unmapped_rows = []
+
+    for canal in channel_order:
+        df_valid_c = df_valid[df_valid["CANAL"] == canal]
+        df_unm_c   = df_unmapped[df_unmapped["CANAL"] == canal]
+
+        if df_unm_c.empty or df_valid_c.empty:
+            continue
+
+        # --- Core metrics from mapped SKUs ---
+        total_sales_mapped = df_valid_c["VALOR_REPASSE"].sum()
+        total_cost_mapped  = (
+            df_valid_c.merge(all_data["T_ProdF"][["CODPF", "ECU"]],
+                             left_on="CODPF", right_on="CODPF", how="left")
+                      .assign(ECU=lambda d: pd.to_numeric(d["ECU"], errors="coerce").fillna(0))
+                      .eval("ECU * 1")
+        ).sum()
+        total_qty_mapped = df_valid_c.shape[0]  # since no QTD field per sale
+
+        avg_ticket = total_sales_mapped / total_qty_mapped if total_qty_mapped else 0
+        cost_ratio = total_cost_mapped / total_sales_mapped if total_sales_mapped else 0
+
+        # --- Unmapped totals ---
+        venda_unmapped = df_unm_c["VALOR_REPASSE"].sum()
+        qtd_unmapped   = round(venda_unmapped / avg_ticket) if avg_ticket else 1
+        ecu_unmapped   = cost_ratio * avg_ticket
+
+        unmapped_rows.append({
+            "SKU": "UNMAPPED",
+            "CODPF": "UNMAPPED",
+            "CODPP": "UNMAPPED",
+            "KON_GR": "Venda",
+            "KON_SGR": "UNMAPPED",
+            "CANAL": canal,
+            "VALOR_REPASSE": venda_unmapped,
+            "QTD": qtd_unmapped,
+            "ECU": ecu_unmapped,
+            "VALID_SKU": True
+        })
+
+        print(f"💡 Added UNMAPPED SKU for {canal}: Venda={venda_unmapped:.2f}, "
+              f"QTD≈{qtd_unmapped}, ECU≈{ecu_unmapped:.2f}")
+
+    # --- Append synthetic rows ---
+    if unmapped_rows:
+        df_unmapped_new = pd.DataFrame(unmapped_rows)
+        df = pd.concat([df, df_unmapped_new], ignore_index=True)
+        print(f"✅ Appended {len(df_unmapped_new)} synthetic UNMAPPED rows.")
+
+    all_data["Kon_RelGeral"] = df
+    return all_data
+
+
+def build_Kon_Detail_SKUAdj(all_data):
+    """
+    Create detailed SKU-level cost table combining direct and indirect deductions,
+    and calculate gross margin (Marg_vlr / Marg_pct).
+    Output sheet: Kon_Detail_SKUAdj
+    """
+    if "Kon_RelGeral_SKUAdj" not in all_data:
+        print("⚠️ Kon_RelGeral_SKUAdj not found. Skipping detail table.")
+        return all_data
+
+    df = all_data["Kon_RelGeral_SKUAdj"].copy()
+    if df.empty:
+        print("⚠️ Kon_RelGeral_SKUAdj is empty.")
+        return all_data
+
+    required_cols = ["SKU", "CANAL", "VALOR_REPASSE", "QTD", "Taxa_val", "Frete_val", "Outros_val"]
+    for c in required_cols:
+        if c not in df.columns:
+            print(f"⚠️ Missing column {c} in Kon_RelGeral_SKUAdj.")
+            return all_data
+
+    # --- rename and base setup ---
+    df["Venda"] = df["VALOR_REPASSE"]
+    df["REF_PEDIDO"] = df["CÓDIGO PEDIDO"] if "CÓDIGO PEDIDO" in df.columns else ""
+
+    # --- group by unique SKU + CANAL + REF_PEDIDO ---
+    grp = df.groupby(["SKU", "CANAL", "REF_PEDIDO"], as_index=False).agg({
+        "Venda": "sum",
+        "QTD": "sum",
+        "Taxa_val": "sum",
+        "Frete_val": "sum",
+        "Outros_val": "sum"
+    })
+
+    # --- direct cost placeholders ---
+    grp["Taxa_dir"] = 0.0
+    grp["Frete_dir"] = 0.0
+    grp["Outros_dir"] = 0.0
+    grp["TotDesc_dir"] = grp["Taxa_dir"] + grp["Frete_dir"] + grp["Outros_dir"]
+
+    # --- indirect (allocated) ---
+    grp["Taxa_ind"] = grp["Taxa_val"]
+    grp["Frete_ind"] = grp["Frete_val"]
+    grp["Outros_ind"] = grp["Outros_val"]
+    grp["TotDesc_ind"] = grp["Taxa_ind"] + grp["Frete_ind"] + grp["Outros_ind"]
+
+    # --- totals ---
+    grp["Taxa_tot"] = grp["Taxa_dir"] + grp["Taxa_ind"]
+    grp["Frete_tot"] = grp["Frete_dir"] + grp["Frete_ind"]
+    grp["Outros_tot"] = grp["Outros_dir"] + grp["Outros_ind"]
+    grp["TotDesc_tot"] = grp["TotDesc_dir"] + grp["TotDesc_ind"]
+
+    # --- ECU lookup (unit cost) ---
+    if "T_ProdF" in all_data and not all_data["T_ProdF"].empty:
+        tprod = all_data["T_ProdF"].copy()
+        if "CODPF" in tprod.columns:
+            tprod.rename(columns={"CODPF": "SKU"}, inplace=True)
+        if "ECU" not in tprod.columns:
+            tprod["ECU"] = 0.0
+        grp = grp.merge(tprod[["SKU", "ECU"]], on="SKU", how="left")
+    else:
+        grp["ECU"] = 0.0
+
+    # --- calculate gross margin ---
+    grp["ECU"] = pd.to_numeric(grp["ECU"], errors="coerce").fillna(0)
+    grp["QTD"] = pd.to_numeric(grp["QTD"], errors="coerce").fillna(0)
+    grp["Venda"] = pd.to_numeric(grp["Venda"], errors="coerce").fillna(0)
+    grp["TotDesc_tot"] = pd.to_numeric(grp["TotDesc_tot"], errors="coerce").fillna(0)
+
+    grp["Marg_vlr"] = grp["Venda"] * (1 - 0.275) - grp["TotDesc_tot"] - (grp["ECU"] * grp["QTD"])
+    grp["Marg_pct"] = grp.apply(lambda r: r["Marg_vlr"] / r["Venda"] if r["Venda"] != 0 else 0, axis=1)
+
+    # --- reorder columns for clarity ---
+    col_order = [
+        "SKU", "CANAL", "REF_PEDIDO", "Venda", "QTD",
+        "Taxa_dir", "Frete_dir", "Outros_dir", "TotDesc_dir",
+        "Taxa_ind", "Frete_ind", "Outros_ind", "TotDesc_ind",
+        "Taxa_tot", "Frete_tot", "Outros_tot", "TotDesc_tot",
+        "ECU", "Marg_vlr", "Marg_pct"
+    ]
+    grp = grp[col_order]
+
+    all_data["Kon_Detail_SKUAdj"] = grp
+    print(f"✅ Kon_Detail_SKUAdj created with shape: {grp.shape}")
+    return all_data
+
 def merge_all_data(all_data):
     print(f"Creating Merged and Calculated Columns")
 
@@ -401,6 +799,35 @@ def merge_all_data(all_data):
     all_data = merge_data(all_data, "O_CC", "CATEGORIA", "T_CCCats", "CC_Categoria Omie", "CC_Cat Grp", default_value='erro')
     all_data = merge_data(all_data, "O_CC", "CATEGORIA", "T_CCCats", "CC_Categoria Omie", "CC_B2X",     default_value='erro')
     all_data = merge_data(all_data, "O_CC", "CATEGORIA", "T_CCCats", "CC_Categoria Omie", "CC_Tipo",    default_value='erro')
+
+    # Kon_RelGeral joins with T_KonCats
+    all_data = merge_data(all_data,
+        df1_name="Kon_RelGeral",
+        df1_col="TP_Lancamento",
+        df2_name="T_KonCats",
+        df2_col="TP_Lancamento",
+        new_col="Kon_Gr",
+        default_value="Outros"
+    )
+    all_data = merge_data(all_data,
+        df1_name="Kon_RelGeral",
+        df1_col="TP_Lancamento",
+        df2_name="T_KonCats",
+        df2_col="TP_Lancamento",
+        new_col="Kon_SGr",
+        default_value="Outros"
+    )
+    # Kon_RelGeral joins with T_ProdF to get CODPP from SKU = CODPF
+    all_data = merge_data(all_data,
+        df1_name="Kon_RelGeral",
+        df1_col="SKU",
+        df2_name="T_ProdF",
+        df2_col="CODPF",
+        new_col="CODPP",
+        default_value=""
+    )
+
+
 
     for key, df in all_data.items():
         if key == 'O_NFCI':
@@ -1407,6 +1834,7 @@ def main(year: int, month: int):
         "O_CC":          "O_CC_{ym}_clean.xlsx",
         "O_CtasAPagar":  "O_CtasAPagar_{ym}_clean.xlsx",
         "O_CtasARec":    "O_CtasARec_{ym}_clean.xlsx",
+        "Kon_RelGeral":  "Kon_RelGeral_{ym}_clean.xlsx",
         # OPTIONAL (load if present; absence will not abort):
         "MLA_Vendas":    "MLA_Vendas_{ym}_clean.xlsx",
         "MLK_ExtLib":    "MLK_ExtLib_{ym}_clean.xlsx",
@@ -1466,6 +1894,7 @@ def main(year: int, month: int):
         "T_CtasAPagarClass":   "T_CtasAPagarClass.xlsx",
         "T_CtasARecClass":     "T_CtasARecClass.xlsx",
         "T_CCCats":            "T_CCCats.xlsx",
+        "T_KonCats":            "T_KonCats.xlsx",
     }
     missing_static = []
     for key, fname in static_files.items():
@@ -1517,6 +1946,14 @@ def main(year: int, month: int):
     # ----------------------------------------------------------------------
     print("Creating Merged and Calculated Columns")
     all_data = merge_all_data(all_data)
+
+    # --- Add synthetic UNMAPPED SKUs per channel ---
+    all_data = add_unmapped_skus(all_data)
+    # --- Build Kon summary ---
+    all_data = build_Kon_Report1(all_data)
+    all_data = allocate_nosku_deductions(all_data)
+    all_data = build_Kon_Detail_SKUAdj(all_data)
+
 
     # ----------------------------------------------------------------------
     # Write each dataframe to the workbook
