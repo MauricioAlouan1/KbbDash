@@ -337,24 +337,24 @@ def build_Kon_Report1(all_data):
         return all_data
 
     df = all_data["Kon_RelGeral"].copy()
-    required_cols = ["CANAL", "VALOR_REPASSE", "Kon_Gr", "Kon_SGr"]
+    required_cols = ["CANAL", "VALOR_REPASSE", "KON_GR", "KON_SGR"]
     for c in required_cols:
         if c not in df.columns:
             print(f"⚠️ Missing column {c} in Kon_RelGeral. Skipping summary.")
             return all_data
 
     # --- filter out unwanted groups ---
-    df = df[~df["Kon_Gr"].isin(["Saldo", "Saque"])]
+    df = df[~df["KON_GR"].isin(["Saldo", "Saque"])]
 
     # --- aggregate ---
     pivot = (
-        df.groupby(["Kon_Gr", "Kon_SGr", "CANAL"], as_index=False)["VALOR_REPASSE"]
+        df.groupby(["KON_GR", "KON_SGR", "CANAL"], as_index=False)["VALOR_REPASSE"]
           .sum()
     )
 
     # --- pivot channels into columns ---
     pivot = pivot.pivot_table(
-        index=["Kon_Gr", "Kon_SGr"],
+        index=["KON_GR", "KON_SGR"],
         columns="CANAL",
         values="VALOR_REPASSE",
         aggfunc="sum",
@@ -368,28 +368,28 @@ def build_Kon_Report1(all_data):
             pivot[ch] = 0
 
     # --- reorder columns and add TOTAL ---
-    pivot = pivot[["Kon_Gr", "Kon_SGr"] + channel_order]
+    pivot = pivot[["KON_GR", "KON_SGR"] + channel_order]
     pivot["TOTAL"] = pivot[channel_order].sum(axis=1)
 
     # --- enforce logical order ---
     order_main = ["Venda", "Taxa-Comissao", "Frete", "Outros"]
     order_sub = ["Bloq-Desbloq", "Devolucao", "Full", "Mkt", "Promo-Rebate", "Impostos Retidos"]
-    pivot["Kon_Gr"] = pd.Categorical(pivot["Kon_Gr"], categories=order_main, ordered=True)
-    pivot["Kon_SGr"] = pd.Categorical(pivot["Kon_SGr"], categories=order_sub, ordered=True)
-    pivot = pivot.sort_values(["Kon_Gr", "Kon_SGr"], na_position="last").reset_index(drop=True)
+    pivot["KON_GR"] = pd.Categorical(pivot["KON_GR"], categories=order_main, ordered=True)
+    pivot["KON_SGR"] = pd.Categorical(pivot["KON_SGR"], categories=order_sub, ordered=True)
+    pivot = pivot.sort_values(["KON_GR", "KON_SGR"], na_position="last").reset_index(drop=True)
 
-    # --- add totals per Kon_Gr (summing all subgroups) ---
+    # --- add totals per KON_GR (summing all subgroups) ---
     totals_by_group = (
-        pivot.groupby("Kon_Gr")[channel_order + ["TOTAL"]].sum().reset_index()
+        pivot.groupby("KON_GR")[channel_order + ["TOTAL"]].sum().reset_index()
     )
-    totals_by_group["Kon_SGr"] = ""
+    totals_by_group["KON_SGR"] = ""
     pivot = pd.concat([pivot, totals_by_group], ignore_index=True)
 
     # --- compute overall totals ---
-    venda_tot   = totals_by_group[totals_by_group["Kon_Gr"] == "Venda"][channel_order + ["TOTAL"]].sum()
-    taxa_tot    = totals_by_group[totals_by_group["Kon_Gr"] == "Taxa-Comissao"][channel_order + ["TOTAL"]].sum()
-    frete_tot   = totals_by_group[totals_by_group["Kon_Gr"] == "Frete"][channel_order + ["TOTAL"]].sum()
-    outros_tot  = totals_by_group[totals_by_group["Kon_Gr"] == "Outros"][channel_order + ["TOTAL"]].sum()
+    venda_tot   = totals_by_group[totals_by_group["KON_GR"] == "Venda"][channel_order + ["TOTAL"]].sum()
+    taxa_tot    = totals_by_group[totals_by_group["KON_GR"] == "Taxa-Comissao"][channel_order + ["TOTAL"]].sum()
+    frete_tot   = totals_by_group[totals_by_group["KON_GR"] == "Frete"][channel_order + ["TOTAL"]].sum()
+    outros_tot  = totals_by_group[totals_by_group["KON_GR"] == "Outros"][channel_order + ["TOTAL"]].sum()
 
     # --- create bottom summary rows ---
     venda_liq = venda_tot - (taxa_tot + frete_tot + outros_tot)
@@ -400,7 +400,7 @@ def build_Kon_Report1(all_data):
         ["Frete_pct", "", *(frete_tot.values / venda_tot.values * 100)],
         ["Outros_pct", "", *(outros_tot.values / venda_tot.values * 100)],
         ["Liquido_pct", "", *(venda_liq.values / venda_tot.values * 100)]
-    ], columns=["Kon_Gr", "Kon_SGr"] + channel_order + ["TOTAL"])
+    ], columns=["KON_GR", "KON_SGR"] + channel_order + ["TOTAL"])
 
     # --- concatenate report ---
     final_report = pd.concat([pivot, pct_rows], ignore_index=True)
@@ -412,23 +412,23 @@ def build_Kon_Report1(all_data):
 def build_Kon_Report_from_df(df, name="Kon_Report_Custom"):
     """
     Generic version of build_Kon_Report1 that accepts a dataframe directly.
-    Produces a pivoted report grouped by Kon_Gr, Kon_SGr, and CANAL.
+    Produces a pivoted report grouped by KON_GR, KON_SGR, and CANAL.
     """
-    required_cols = ["CANAL", "VALOR_REPASSE", "Kon_Gr", "Kon_SGr"]
+    required_cols = ["CANAL", "VALOR_REPASSE", "KON_GR", "KON_SGR"]
     for c in required_cols:
         if c not in df.columns:
             print(f"⚠️ Missing column {c} in input for {name}. Skipping.")
             return pd.DataFrame()
 
-    df = df[~df["Kon_Gr"].isin(["Saldo", "Saque"])]
+    df = df[~df["KON_GR"].isin(["Saldo", "Saque"])]
 
     pivot = (
-        df.groupby(["Kon_Gr", "Kon_SGr", "CANAL"], as_index=False)["VALOR_REPASSE"]
+        df.groupby(["KON_GR", "KON_SGR", "CANAL"], as_index=False)["VALOR_REPASSE"]
           .sum()
     )
 
     pivot = pivot.pivot_table(
-        index=["Kon_Gr", "Kon_SGr"],
+        index=["KON_GR", "KON_SGR"],
         columns="CANAL",
         values="VALOR_REPASSE",
         aggfunc="sum",
@@ -440,7 +440,7 @@ def build_Kon_Report_from_df(df, name="Kon_Report_Custom"):
         if ch not in pivot.columns:
             pivot[ch] = 0
 
-    pivot = pivot[["Kon_Gr", "Kon_SGr"] + channel_order]
+    pivot = pivot[["KON_GR", "KON_SGR"] + channel_order]
     pivot["TOTAL"] = pivot[channel_order].sum(axis=1)
     pivot["Report_Name"] = name
 
@@ -486,7 +486,7 @@ def allocate_nosku_deductions(all_data):
             continue
 
         rep_canal = build_Kon_Report_from_df(df_canal, name=f"Kon_NoSKU_{canal}")
-        agg = rep_canal.groupby("Kon_Gr")[["TOTAL"]].sum()
+        agg = rep_canal.groupby("KON_GR")[["TOTAL"]].sum()
 
         venda_tot  = agg.loc["Venda"]["TOTAL"] if "Venda" in agg.index else 1
         taxa_tot   = agg.loc["Taxa-Comissao"]["TOTAL"] if "Taxa-Comissao" in agg.index else 0
@@ -806,7 +806,7 @@ def merge_all_data(all_data):
         df1_col="TP_Lancamento",
         df2_name="T_KonCats",
         df2_col="TP_Lancamento",
-        new_col="Kon_Gr",
+        new_col="KON_GR",
         default_value="Outros"
     )
     all_data = merge_data(all_data,
@@ -814,7 +814,7 @@ def merge_all_data(all_data):
         df1_col="TP_Lancamento",
         df2_name="T_KonCats",
         df2_col="TP_Lancamento",
-        new_col="Kon_SGr",
+        new_col="KON_SGR",
         default_value="Outros"
     )
     # Kon_RelGeral joins with T_ProdF to get CODPP from SKU = CODPF
