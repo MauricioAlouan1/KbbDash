@@ -425,15 +425,28 @@ def compute_channel_ratios(all_data):
         print("⚠️ Kon_RelGeral empty or missing KON_GR.")
         return all_data
 
+    print("\n🧭 DEBUG: Unique values in KON_GR (first 50):")
+    print(df["KON_GR"].dropna().unique()[:50])
+    print("\n🧭 DEBUG: Unique values in KON_SGR (first 50):")
+    if "KON_SGR" in df.columns:
+        print(df["KON_SGR"].dropna().unique()[:50])
+    else:
+        print("⚠️ KON_SGR column not found in Kon_RelGeral")
+
+    print("df: AAA")
+    print(df.head())
+
+
     # --- Clean up data ---
     df["VALOR_REPASSE"] = pd.to_numeric(df["VALOR_REPASSE"], errors="coerce").fillna(0)
-    df["CANAL"] = df["CANAL"].astype(str).str.strip()
+    df["CANAL"] = df["CANAL"].astype(str).str.strip().str.upper()
 
-    channel_order = ["Amazon", "Magazine Luiza", "Mercado Livre", "Shopee"]
+    channel_order = ["AMAZON", "MAGAZINE LUIZA", "MERCADO LIVRE", "SHOPEE"]
     ratio_rows = []
 
     for canal in channel_order:
         df_c = df[df["CANAL"] == canal]
+        print(f"\nBBB → inspecting {canal}: {len(df_c)} rows")
         if df_c.empty:
             ratio_rows.append({
                 "CANAL": canal,
@@ -467,9 +480,12 @@ def compute_channel_ratios(all_data):
             })
             continue
 
-        taxa_pct  = abs(total_taxa / total_venda)
-        frete_pct = abs(total_frete / total_venda)
-        outros_pct= abs(total_outros / total_venda)
+        print("df_c: BBB")
+        print(df_c.head())
+
+        taxa_pct  = total_taxa / total_venda
+        frete_pct = total_frete / total_venda
+        outros_pct= total_outros / total_venda
         total_pct = taxa_pct + frete_pct + outros_pct
 
         ratio_rows.append({
@@ -489,6 +505,10 @@ def compute_channel_ratios(all_data):
               f"→ Ratios = {taxa_pct:.2%}, {frete_pct:.2%}, {outros_pct:.2%}")
 
     df_ratios = pd.DataFrame(ratio_rows)
+
+    print("df_ratios: AAA")
+    print(df_ratios.head())
+
     all_data["Kon_Ratios"] = df_ratios
     print(f"✅ Kon_Ratios created with {len(df_ratios)} rows.")
     return all_data
