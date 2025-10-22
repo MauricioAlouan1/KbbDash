@@ -409,6 +409,90 @@ def build_Kon_Report1(all_data):
     print(f"✅ Kon_Report1 created with shape: {final_report.shape}")
     return all_data
 
+def compute_channel_ratios(all_data):
+    """
+    Compute per-channel ratios for Taxa-Comissao, Frete, and Outros 
+    based on actual KON_GR values in Kon_RelGeral.
+    Saves results to Kon_Ratios for use in margin and deduction calculations.
+    Also includes absolute totals for auditing (Venda, Taxa, Frete, Outros).
+    """
+    if "Kon_RelGeral" not in all_data:
+        print("⚠️ Kon_RelGeral not found. Skipping ratio computation.")
+        return all_data
+
+    df = all_data["Kon_RelGeral"].copy()
+    if df.empty or "KON_GR" not in df.columns:
+        print("⚠️ Kon_RelGeral empty or missing KON_GR.")
+        return all_data
+
+    # --- Clean up data ---
+    df["VALOR_REPASSE"] = pd.to_numeric(df["VALOR_REPASSE"], errors="coerce").fillna(0)
+    df["CANAL"] = df["CANAL"].astype(str).str.strip()
+
+    channel_order = ["Amazon", "Magazine Luiza", "Mercado Livre", "Shopee"]
+    ratio_rows = []
+
+    for canal in channel_order:
+        df_c = df[df["CANAL"] == canal]
+        if df_c.empty:
+            ratio_rows.append({
+                "CANAL": canal,
+                "Venda_total": 0,
+                "Taxa_total": 0,
+                "Frete_total": 0,
+                "Outros_total": 0,
+                "Taxa_pct": 0,
+                "Frete_pct": 0,
+                "Outros_pct": 0,
+                "Total_pct": 0
+            })
+            continue
+
+        total_venda = df_c.loc[df_c["KON_GR"].str.upper() == "VENDA", "VALOR_REPASSE"].sum()
+        total_taxa  = df_c.loc[df_c["KON_GR"].str.upper() == "TAXA-COMISSAO", "VALOR_REPASSE"].sum()
+        total_frete = df_c.loc[df_c["KON_GR"].str.upper() == "FRETE", "VALOR_REPASSE"].sum()
+        total_outros= df_c.loc[df_c["KON_GR"].str.upper() == "OUTROS", "VALOR_REPASSE"].sum()
+
+        if total_venda == 0:
+            ratio_rows.append({
+                "CANAL": canal,
+                "Venda_total": 0,
+                "Taxa_total": 0,
+                "Frete_total": 0,
+                "Outros_total": 0,
+                "Taxa_pct": 0,
+                "Frete_pct": 0,
+                "Outros_pct": 0,
+                "Total_pct": 0
+            })
+            continue
+
+        taxa_pct  = abs(total_taxa / total_venda)
+        frete_pct = abs(total_frete / total_venda)
+        outros_pct= abs(total_outros / total_venda)
+        total_pct = taxa_pct + frete_pct + outros_pct
+
+        ratio_rows.append({
+            "CANAL": canal,
+            "Venda_total": total_venda,
+            "Taxa_total": total_taxa,
+            "Frete_total": total_frete,
+            "Outros_total": total_outros,
+            "Taxa_pct": taxa_pct,
+            "Frete_pct": frete_pct,
+            "Outros_pct": outros_pct,
+            "Total_pct": total_pct
+        })
+
+        print(f"📊 {canal}: Venda={total_venda:.2f}, "
+              f"Taxa={total_taxa:.2f}, Frete={total_frete:.2f}, Outros={total_outros:.2f} "
+              f"→ Ratios = {taxa_pct:.2%}, {frete_pct:.2%}, {outros_pct:.2%}")
+
+    df_ratios = pd.DataFrame(ratio_rows)
+    all_data["Kon_Ratios"] = df_ratios
+    print(f"✅ Kon_Ratios created with {len(df_ratios)} rows.")
+    return all_data
+
 def build_Kon_Report_from_df(df, name="Kon_Report_Custom"):
     """
     Generic version of build_Kon_Report1 that accepts a dataframe directly.
@@ -622,91 +706,92 @@ def add_unmapped_skus(all_data):
     all_data["Kon_RelGeral"] = df
     return all_data
 
-
 def build_Kon_Detail_SKUAdj(all_data):
     """
-    Create detailed SKU-level cost table combining direct and indirect deductions,
-    and calculate gross margin (Marg_vlr / Marg_pct).
+    Create detailed SKU-level cost table combining indirect deductions (Taxa/Frete/Outros)
+    based on per-channel ratios, and calculate gross margin.
     Output sheet: Kon_Detail_SKUAdj
     """
-    if "Kon_RelGeral_SKUAdj" not in all_data:
-        print("⚠️ Kon_RelGeral_SKUAdj not found. Skipping detail table.")
+    if "Kon_RelGeral" not in all_data:
+        print("⚠️ Kon_RelGeral not found. Skipping detail table.")
         return all_data
 
-    df = all_data["Kon_RelGeral_SKUAdj"].copy()
+    df = all_data["Kon_RelGeral"].copy()
     if df.empty:
-        print("⚠️ Kon_RelGeral_SKUAdj is empty.")
+        print("⚠️ Kon_RelGeral is empty.")
         return all_data
 
-    required_cols = ["SKU", "CANAL", "VALOR_REPASSE", "QTD", "Taxa_val", "Frete_val", "Outros_val"]
+    # --- Check required columns ---
+    required_cols = ["SKU", "CANAL", "VALOR_REPASSE", "CODPP", "KON_GR"]
     for c in required_cols:
         if c not in df.columns:
-            print(f"⚠️ Missing column {c} in Kon_RelGeral_SKUAdj.")
+            print(f"⚠️ Missing column {c} in Kon_RelGeral.")
             return all_data
 
-    # --- rename and base setup ---
-    df["Venda"] = df["VALOR_REPASSE"]
-    df["REF_PEDIDO"] = df["CÓDIGO PEDIDO"] if "CÓDIGO PEDIDO" in df.columns else ""
+    # --- Keep only Venda lines for SKU-level report ---
+    df = df[df["KON_GR"].str.upper() == "VENDA"].copy()
 
-    # --- group by unique SKU + CANAL + REF_PEDIDO ---
-    grp = df.groupby(["SKU", "CANAL", "REF_PEDIDO"], as_index=False).agg({
-        "Venda": "sum",
-        "QTD": "sum",
-        "Taxa_val": "sum",
-        "Frete_val": "sum",
-        "Outros_val": "sum"
-    })
+    # --- Ensure numeric values ---
+    df["VALOR_REPASSE"] = pd.to_numeric(df["VALOR_REPASSE"], errors="coerce").fillna(0)
 
-    # --- direct cost placeholders ---
-    grp["Taxa_dir"] = 0.0
-    grp["Frete_dir"] = 0.0
-    grp["Outros_dir"] = 0.0
-    grp["TotDesc_dir"] = grp["Taxa_dir"] + grp["Frete_dir"] + grp["Outros_dir"]
+    # --- Add default quantity (proxy 1 per REF_PEDIDO) ---
+    df["REF_PEDIDO"] = df.get("REF_PEDIDO", "")
+    df["QTD"] = 1
 
-    # --- indirect (allocated) ---
-    grp["Taxa_ind"] = grp["Taxa_val"]
-    grp["Frete_ind"] = grp["Frete_val"]
-    grp["Outros_ind"] = grp["Outros_val"]
-    grp["TotDesc_ind"] = grp["Taxa_ind"] + grp["Frete_ind"] + grp["Outros_ind"]
-
-    # --- totals ---
-    grp["Taxa_tot"] = grp["Taxa_dir"] + grp["Taxa_ind"]
-    grp["Frete_tot"] = grp["Frete_dir"] + grp["Frete_ind"]
-    grp["Outros_tot"] = grp["Outros_dir"] + grp["Outros_ind"]
-    grp["TotDesc_tot"] = grp["TotDesc_dir"] + grp["TotDesc_ind"]
-
-    # --- ECU lookup (unit cost) ---
+    # --- Bring ECU from T_ProdF ---
     if "T_ProdF" in all_data and not all_data["T_ProdF"].empty:
         tprod = all_data["T_ProdF"].copy()
         if "CODPF" in tprod.columns:
             tprod.rename(columns={"CODPF": "SKU"}, inplace=True)
         if "ECU" not in tprod.columns:
             tprod["ECU"] = 0.0
-        grp = grp.merge(tprod[["SKU", "ECU"]], on="SKU", how="left")
+        df = df.merge(tprod[["SKU", "ECU"]], on="SKU", how="left")
     else:
-        grp["ECU"] = 0.0
+        df["ECU"] = 0.0
 
-    # --- calculate gross margin ---
-    grp["ECU"] = pd.to_numeric(grp["ECU"], errors="coerce").fillna(0)
-    grp["QTD"] = pd.to_numeric(grp["QTD"], errors="coerce").fillna(0)
-    grp["Venda"] = pd.to_numeric(grp["Venda"], errors="coerce").fillna(0)
-    grp["TotDesc_tot"] = pd.to_numeric(grp["TotDesc_tot"], errors="coerce").fillna(0)
+    # --- Bring ratios by channel ---
+    if "Kon_Ratios" in all_data and not all_data["Kon_Ratios"].empty:
+        ratios = all_data["Kon_Ratios"].copy()
+        df = df.merge(ratios, on="CANAL", how="left")
+    else:
+        df["Taxa_pct"] = df["Frete_pct"] = df["Outros_pct"] = df["Total_pct"] = 0.0
 
-    grp["Marg_vlr"] = grp["Venda"] * (1 - 0.275) - grp["TotDesc_tot"] - (grp["ECU"] * grp["QTD"])
-    grp["Marg_pct"] = grp.apply(lambda r: r["Marg_vlr"] / r["Venda"] if r["Venda"] != 0 else 0, axis=1)
+    # --- Calculate indirect deductions per SKU ---
+    df["Taxa_dir"] = df["Frete_dir"] = df["Outros_dir"] = 0.0
+    df["TotDesc_dir"] = 0.0
 
-    # --- reorder columns for clarity ---
+    df["Taxa_ind"]   = -df["VALOR_REPASSE"] * df["Taxa_pct"].fillna(0)
+    df["Frete_ind"]  = -df["VALOR_REPASSE"] * df["Frete_pct"].fillna(0)
+    df["Outros_ind"] = -df["VALOR_REPASSE"] * df["Outros_pct"].fillna(0)
+    df["TotDesc_ind"] = df["Taxa_ind"] + df["Frete_ind"] + df["Outros_ind"]
+
+    # --- Totals ---
+    df["Taxa_tot"] = df["Taxa_dir"] + df["Taxa_ind"]
+    df["Frete_tot"] = df["Frete_dir"] + df["Frete_ind"]
+    df["Outros_tot"] = df["Outros_dir"] + df["Outros_ind"]
+    df["TotDesc_tot"] = df["TotDesc_dir"] + df["TotDesc_ind"]
+
+    # --- Ensure numeric for ECU, QTD, Venda ---
+    df["ECU"] = pd.to_numeric(df["ECU"], errors="coerce").fillna(0)
+    df["QTD"] = pd.to_numeric(df["QTD"], errors="coerce").fillna(1)
+    df["Venda"] = df["VALOR_REPASSE"]
+
+    # --- Margin calculation ---
+    df["Marg_vlr"] = df["Venda"] * (1 - 0.275) - df["TotDesc_tot"] - (df["ECU"] * df["QTD"])
+    df["Marg_pct"] = df.apply(lambda r: r["Marg_vlr"] / r["Venda"] if r["Venda"] != 0 else 0, axis=1)
+
+    # --- Select and order columns ---
     col_order = [
-        "SKU", "CANAL", "REF_PEDIDO", "Venda", "QTD",
+        "SKU", "CODPP", "CANAL", "REF_PEDIDO", "Venda", "QTD",
         "Taxa_dir", "Frete_dir", "Outros_dir", "TotDesc_dir",
         "Taxa_ind", "Frete_ind", "Outros_ind", "TotDesc_ind",
         "Taxa_tot", "Frete_tot", "Outros_tot", "TotDesc_tot",
         "ECU", "Marg_vlr", "Marg_pct"
     ]
-    grp = grp[col_order]
+    df = df[col_order]
 
-    all_data["Kon_Detail_SKUAdj"] = grp
-    print(f"✅ Kon_Detail_SKUAdj created with shape: {grp.shape}")
+    all_data["Kon_Detail_SKUAdj"] = df
+    print(f"✅ Kon_Detail_SKUAdj created with shape: {df.shape}")
     return all_data
 
 def merge_all_data(all_data):
@@ -1029,6 +1114,7 @@ def merge_all_data(all_data):
         all_data[key] = df
 
     return all_data
+
 def preprocess_inventory_data(file_path):
     sheets = pd.read_excel(file_path, sheet_name=None, header=1)  # Load data with headers from the second row
     processed_sheets = {}
@@ -1894,7 +1980,7 @@ def main(year: int, month: int):
         "T_CtasAPagarClass":   "T_CtasAPagarClass.xlsx",
         "T_CtasARecClass":     "T_CtasARecClass.xlsx",
         "T_CCCats":            "T_CCCats.xlsx",
-        "T_KonCats":            "T_KonCats.xlsx",
+        "T_KonCats":           "T_KonCats.xlsx",
     }
     missing_static = []
     for key, fname in static_files.items():
@@ -1951,15 +2037,29 @@ def main(year: int, month: int):
     all_data = add_unmapped_skus(all_data)
     # --- Build Kon summary ---
     all_data = build_Kon_Report1(all_data)
-    all_data = allocate_nosku_deductions(all_data)
+    #all_data = allocate_nosku_deductions(all_data)
+    # --- Compute platform ratios directly from KON_GR ---
+    all_data = compute_channel_ratios(all_data)
     all_data = build_Kon_Detail_SKUAdj(all_data)
 
 
     # ----------------------------------------------------------------------
     # Write each dataframe to the workbook
     # ----------------------------------------------------------------------
+    # --- Define list of static tables to exclude ---
+    excluded_sheets = {
+        "T_CondPagto", "T_Fretes", "T_GruposCli", "T_MP", "T_RegrasMP",
+        "T_Remessas", "T_Reps", "T_Verbas", "T_Vol", "T_ProdF", "T_ProdP",
+        "T_Entradas", "T_FretesMP", "T_MLStatus", "T_CtasAPagarClass",
+        "T_CtasARecClass", "T_CCCats", "T_KonCats"
+    }
+
+    # --- Write each dataframe except excluded ones ---
     for key, df in all_data.items():
-        sheet_name = (key or "Sheet")[:31]  # Excel 31-char limit
+        if key in excluded_sheets:
+            print(f"⏩ Skipped static sheet: {key}")
+            continue
+        sheet_name = (key or "Sheet")[:31]  # Excel sheet name limit
         ws = wb_template.create_sheet(title=sheet_name)
         for row in dataframe_to_rows(df, index=False, header=True):
             ws.append(row)
@@ -1970,8 +2070,9 @@ def main(year: int, month: int):
 
     # Optional formatting (only if your helpers are defined)
     try:
-        excel_format(output_file, column_format_dict)
-        excel_autofilters(output_file)
+        #excel_format(output_file, column_format_dict)
+        #excel_autofilters(output_file)
+        print(f"✅ Skipped Formatting and autofilters")
     except NameError:
         pass
 
