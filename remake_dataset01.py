@@ -510,7 +510,58 @@ def compute_channel_ratios(all_data):
     print(df_ratios.head())
 
     all_data["Kon_Ratios"] = df_ratios
+
     print(f"✅ Kon_Ratios created with {len(df_ratios)} rows.")
+
+    # --- Build transposed summary version of ratios ---
+    df_t = df_ratios.copy()
+
+    # Add Desc_total per channel (Taxa + Frete + Outros)
+    df_t["Desc_total"] = df_t["Taxa_total"] + df_t["Frete_total"] + df_t["Outros_total"]
+
+    # Corrected: Venda_liq = Venda_total + Desc_total
+    # (Desc_total is negative → this effectively subtracts)
+    df_t["Venda_liq"] = df_t["Venda_total"] + df_t["Desc_total"]
+
+    # --- Compute totals correctly ---
+    total_row = {
+        "CANAL": "TOTAL",
+        "Venda_total": df_t["Venda_total"].sum(),
+        "Taxa_total": df_t["Taxa_total"].sum(),
+        "Frete_total": df_t["Frete_total"].sum(),
+        "Outros_total": df_t["Outros_total"].sum(),
+        "Desc_total": df_t["Desc_total"].sum(),
+        "Venda_liq": df_t["Venda_total"].sum() + df_t["Desc_total"].sum()
+    }
+
+    # Recalculate total percentages from total sums (not sum of pct)
+    total_row["Taxa_pct"] = total_row["Taxa_total"] / total_row["Venda_total"]
+    total_row["Frete_pct"] = total_row["Frete_total"] / total_row["Venda_total"]
+    total_row["Outros_pct"] = total_row["Outros_total"] / total_row["Venda_total"]
+    total_row["Total_pct"] = total_row["Desc_total"] / total_row["Venda_total"]
+
+    # Append total row to ratios table (for reference before transpose)
+    df_t = pd.concat([df_t, pd.DataFrame([total_row])], ignore_index=True)
+
+    # --- Transpose: rows become metrics, columns become CANALs ---
+    df_t = (
+        df_t.set_index("CANAL")
+             .T
+             .rename_axis("METRICA")
+             .reset_index()
+    )
+
+    # --- Add TOTAL column recomputed from sums ---
+    canal_cols = [c for c in df_t.columns if c not in ("METRICA", "TOTAL")]
+    df_t["TOTAL"] = df_t[canal_cols].sum(axis=1)
+
+    # --- Optional rounding for presentation ---
+    for c in canal_cols + ["TOTAL"]:
+        df_t[c] = df_t[c].round(2)
+
+    all_data["Kon_Ratios_T"] = df_t
+    print(f"✅ Kon_Ratios_T created with shape: {df_t.shape}")
+
     return all_data
 
 def build_Kon_Report_from_df(df, name="Kon_Report_Custom"):
@@ -757,17 +808,6 @@ def build_Kon_Detail_SKUAdj(all_data):
     # --- Add default quantity (proxy 1 per REF_PEDIDO) ---
     df["REF_PEDIDO"] = df.get("REF_PEDIDO", "")
     df["QTD"] = 1
-
-    # --- Bring ECU from T_ProdF ---
-    if "T_ProdF" in all_data and not all_data["T_ProdF"].empty:
-        tprod = all_data["T_ProdF"].copy()
-        if "CODPF" in tprod.columns:
-            tprod.rename(columns={"CODPF": "SKU"}, inplace=True)
-        if "ECU" not in tprod.columns:
-            tprod["ECU"] = 0.0
-        df = df.merge(tprod[["SKU", "ECU"]], on="SKU", how="left")
-    else:
-        df["ECU"] = 0.0
 
     # --- Bring ratios by channel ---
     if "Kon_Ratios" in all_data and not all_data["Kon_Ratios"].empty:
@@ -2055,10 +2095,22 @@ def main(year: int, month: int):
 
     # --- Add synthetic UNMAPPED SKUs per channel ---
     all_data = add_unmapped_skus(all_data)
+
+    # --- Add last cost (ECU) lookup directly on Kon_RelGeral ---
+    all_data = merge_data_lastcost(
+        all_data,
+        df1_name="Kon_RelGeral",      # or "Kon_Geral" if that’s your real key
+        df1_product_col="CODPP",
+        df1_date_col="DATA_PEDIDO",  # or your actual sale date col
+        df2_name="T_Entradas",
+        df2_product_col="PAI",
+        df2_date_col="ULTIMA ENTRADA",
+        df2_cost_col="ULT CU R$",
+        new_col_name="ECU",
+        default_value=999
+    )
     # --- Build Kon summary ---
     all_data = build_Kon_Report1(all_data)
-    #all_data = allocate_nosku_deductions(all_data)
-    # --- Compute platform ratios directly from KON_GR ---
     all_data = compute_channel_ratios(all_data)
     all_data = build_Kon_Detail_SKUAdj(all_data)
 
