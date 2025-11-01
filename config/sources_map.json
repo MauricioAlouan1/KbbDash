@@ -1,0 +1,33 @@
+{
+  "O_NFCI": {
+    "pattern": "clean/*/O_NFCI_*_clean.xlsx"
+  },
+  "L_LPI": {
+    "pattern": "clean/*/L_LPI_*_clean.xlsx"
+  },
+  "B_EFull": {
+    "pattern": "clean/*/B_EFull*.xlsx"
+  },
+  "Conc_Estoque": {
+    "pattern": "clean/*/R_Estoq_fdm_*.xlsx"
+  },
+  "T_Entradas": {
+    "path": "Tables/T_Entradas.xlsx"
+  },
+  "T_CCCats": {
+    "path": "Tables/T_CCCats.xlsx"
+  },
+  "T_Reps": {
+    "path": "Tables/T_Reps.xlsx"
+  },
+  "T_CondPagto": {
+    "path": "Tables/T_CondPagto.xlsx"
+  },
+  "T_MP": {
+    "path": "Tables/T_MP.xlsx"
+  },
+  "T_RegrasMP": {
+    "path": "Tables/T_RegrasMP.xlsx"
+  }
+}
+

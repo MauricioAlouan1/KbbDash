@@ -1,0 +1,9 @@
+{
+  "fact_sales": ["O_NFCI", "L_LPI", "T_CondPagto", "T_Reps"],
+  "fact_inventory_positions": ["Conc_Estoque", "T_MP", "T_RegrasMP"],
+  "fact_inventory_movements": ["B_EFull", "T_MP", "T_RegrasMP"],
+  "fact_forecast": ["Sales_forecast", "T_MP", "T_RegrasMP"],
+  "fact_containers": ["Containers", "T_Entradas"],
+  "fact_cashflow": ["O_CtasARec", "O_CtasAPagar", "T_CCCats"]
+}
+
