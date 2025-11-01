@@ -172,7 +172,14 @@ def main():
             builder_func = getattr(builder_module, builder_name)
             
             # Call builder with loaded sources
-            df = builder_func(data_root, loaded_sources)
+            result = builder_func(data_root, loaded_sources)
+            
+            # Handle tuple return (df, was_built) or just DataFrame
+            if isinstance(result, tuple):
+                df, was_built = result
+            else:
+                df = result
+                was_built = True
             
         except ImportError as e:
             # Builder module doesn't exist - raise clear error (STRICT)
