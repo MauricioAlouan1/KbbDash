@@ -978,27 +978,27 @@ def merge_all_data(all_data):
             # Note: Using new column names from process_data.py
             df['C'] = 1 - df['REM_NF']
             df['B'] = df.apply(lambda row: 1 if row['OP'] == 'REMESSA DE PRODUTO' and row['C'] == 1 else 0, axis=1)
-            df['ECT'] = df['ECU'] * df['Qt'] * df['C']  # Qt instead of QTD
-            df['COMISSVLR'] = df['PMerc_T'] * df['COMISSPCT'] * df['C']  # PMerc_T instead of MERCVLR
-            df['FRETEVLR'] = df.apply(lambda row: max(row['FRETEPCT'] * row['PNF_T'] * row['C'],  # PNF_T instead of TOTALNF
+            df['ECT'] = df['ECU'] * df['QT'] * df['C']
+            df['COMISSVLR'] = df['PMERC_T'] * df['COMISSPCT'] * df['C']
+            df['FRETEVLR'] = df.apply(lambda row: max(row['FRETEPCT'] * row['PNF_T'] * row['C'],
                                                       row['FRETEPCT'] * row['ECT'] * row['C'] * 2), axis=1)
-            df['VERBAVLR'] = df['VERBAPCT'] * df['PNF_T'] * df['C']  # PNF_T instead of TOTALNF
-            df['MARGVLR'] = df['C'] * ( df['PMerc_T'] * (1 - 0.0925) - df['ICMS_T'] ) - df['VERBAVLR'] - df['FRETEVLR'] - df['COMISSVLR'] - df['ECT']  # PMerc_T instead of MERCVLR, ICMS_T instead of ICMS
-            df['MARGPCT'] = df['MARGVLR'] / df['PMerc_T']  # PMerc_T instead of MERCVLR
+            df['VERBAVLR'] = df['VERBAPCT'] * df['PNF_T'] * df['C']
+            df['MARGVLR'] = df['C'] * ( df['PMERC_T'] * (1 - 0.0925) - df['ICMS_T'] ) - df['VERBAVLR'] - df['FRETEVLR'] - df['COMISSVLR'] - df['ECT']
+            df['MARGPCT'] = df['MARGVLR'] / df['PMERC_T']
 
         elif key == 'L_LPI':
-            # Note: Using new column names from process_data.py
+            # Note: All column names are uppercase after standardize_text_case
             # make sure join key is string
-            if 'CodPed' in df.columns:  # CodPed instead of CÓDIGO PEDIDO
-                df['CodPed'] = df['CodPed'].astype(str).str.strip()
+            if 'CODPED' in df.columns:
+                df['CODPED'] = df['CODPED'].astype(str).str.strip()
 
             cols_to_drop = ['PREÇO', 'PREÇO TOTAL', 'DESCONTO ITEM', 'DESCONTO TOTAL']
             df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
 
             df["MP2"] = df["MP"].str[:2]
-            df['VALIDO'] = df['Status'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)  # Status instead of STATUS PEDIDO
+            df['VALIDO'] = df['STATUS'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
             df['KAB'] = df.apply(lambda row: 1 if row['VALIDO'] == 1 and row['EMPRESA'] in ['K', 'A', 'B'] else 0, axis=1)
-            df['ECTK'] = df['ECUK'] * df['Qt'] * df['KAB']  # Qt instead of QTD
+            df['ECTK'] = df['ECUK'] * df['QT'] * df['KAB']
 
             # ----- TipoAnuncio from MLK_Vendas -----
             if ('MLK_Vendas' in all_data and
@@ -1008,7 +1008,7 @@ def merge_all_data(all_data):
                 print_table_head(all_data, "MLK_Vendas")
                 df = df.merge(
                     all_data['MLK_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
-                    left_on='CodPed',  # CodPed instead of CÓDIGO PEDIDO
+                    left_on='CODPED',
                     right_on='N.º DE VENDA',
                     how='left'
                 )
@@ -1028,7 +1028,7 @@ def merge_all_data(all_data):
                 all_data['MLA_Vendas']['N.º DE VENDA'] = all_data['MLA_Vendas']['N.º DE VENDA'].astype(str).str.strip()
                 df = df.merge(
                     all_data['MLA_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
-                    left_on='CodPed',  # CodPed instead of CÓDIGO PEDIDO
+                    left_on='CODPED',
                     right_on='N.º DE VENDA',
                     how='left'
                 )
@@ -1047,7 +1047,7 @@ def merge_all_data(all_data):
                 all_data['MLB_Vendas']['N.º DE VENDA'] = all_data['MLB_Vendas']['N.º DE VENDA'].astype(str).str.strip()
                 df = df.merge(
                     all_data['MLB_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
-                    left_on='CodPed',  # CodPed instead of CÓDIGO PEDIDO
+                    left_on='CODPED',
                     right_on='N.º DE VENDA',
                     how='left'
                 )
@@ -1079,9 +1079,9 @@ def merge_all_data(all_data):
                     how='left'
                 )
                 df['ComissPctMp'] = df['TARMP']
-                df['ComissPctVlr'] = df['PMerc_T'] * df['ComissPctMp'] * -1  # PMerc_T instead of VLRVENDA
+                df['ComissPctVlr'] = df['PMERC_T'] * df['ComissPctMp'] * -1
                 df['FreteFixoVlr'] = df.apply(
-                    lambda row: -row['FRETEFIX'] if row['PMerc_T'] < row['FFABAIXODE'] else 0,  # PMerc_T instead of VLRVENDA
+                    lambda row: -row['FRETEFIX'] if row['PMERC_T'] < row['FFABAIXODE'] else 0,
                     axis=1
                 )
                 df.drop(columns=['MPX', 'TARMP', 'FFABAIXODE', 'FRETEFIX'], inplace=True)
@@ -1108,20 +1108,20 @@ def merge_all_data(all_data):
                 df.drop(columns=['MP_2L'], inplace=True)
 
             df['Rebate'] = 0.0
-            df['REPASSE'] = df['PMerc_T'] + df['ComissPctVlr'] + df['FreteFixoVlr'] + df['FreteProdVlr'] + df['Rebate']  # PMerc_T instead of VLRVENDA
+            df['REPASSE'] = df['PMERC_T'] + df['ComissPctVlr'] + df['FreteFixoVlr'] + df['FreteProdVlr'] + df['Rebate']
             df['ImpLP'] = df.apply(
-                lambda row: -0.0925 * row['PMerc_T'] if row['EMPRESA'] == 'K' else  # PMerc_T instead of VLRVENDA
-                            -0.14   * row['PMerc_T'] if row['EMPRESA'] == 'A' else  # PMerc_T instead of VLRVENDA
-                            -0.10   * row['PMerc_T'] if row['EMPRESA'] == 'B' else 0,  # PMerc_T instead of VLRVENDA
+                lambda row: -0.0925 * row['PMERC_T'] if row['EMPRESA'] == 'K' else
+                            -0.14   * row['PMERC_T'] if row['EMPRESA'] == 'A' else
+                            -0.10   * row['PMERC_T'] if row['EMPRESA'] == 'B' else 0,
                 axis=1)
-            df['ImpICMS'] = df.apply(lambda row: -0.18 * row['PMerc_T'] if row['EMPRESA'] == 'K' else 0, axis=1)  # PMerc_T instead of VLRVENDA
+            df['ImpICMS'] = df.apply(lambda row: -0.18 * row['PMERC_T'] if row['EMPRESA'] == 'K' else 0, axis=1)
             df['ImpTot'] = df['ImpLP'] + df['ImpICMS']
             df['MargVlr'] = df.apply(
                 lambda row: 0 if row['EMPRESA'] == 'NC' else
-                            row['REPASSE'] + row['ImpTot'] - row['ECTK'] - 1 - (0.01)*row['PMerc_T'] if row['EMPRESA'] == 'K' else  # PMerc_T instead of VLRVENDA
+                            row['REPASSE'] + row['ImpTot'] - row['ECTK'] - 1 - (0.01)*row['PMERC_T'] if row['EMPRESA'] == 'K' else
                             row['REPASSE'] + row['ImpTot'] - 1.6 * row['ECTK'],
                 axis=1)
-            df['MargPct'] = df['MargVlr'] / df['PMerc_T']  # PMerc_T instead of VLRVENDA
+            df['MargPct'] = df['MargVlr'] / df['PMERC_T']
 
         elif key == 'MLA_Vendas':
             if 'N.º DE VENDA' in df.columns:
