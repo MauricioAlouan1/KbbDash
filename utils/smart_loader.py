@@ -51,6 +51,58 @@ def _check_files_exist(excel_files: list[Path]) -> tuple[bool, list[Path]]:
     return len(existing) == len(excel_files), existing
 
 
+def _sort_by_date_month(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Sort DataFrame by date/month in ascending order.
+    
+    Priority:
+    1. AnoMes column (YYMM format string/numeric) - highest priority
+    2. DATE column (datetime or parseable)
+    3. Other date columns (DATA DA VENDA, etc.)
+    
+    Returns sorted DataFrame (copy).
+    """
+    df = df.copy()
+    
+    # Priority 1: AnoMes column (common in this codebase)
+    if "AnoMes" in df.columns:
+        # Convert to numeric for proper sorting (handles YYMM strings)
+        df_sorted = df.copy()
+        df_sorted["_ano_mes_sort"] = pd.to_numeric(df["AnoMes"], errors="coerce")
+        df_sorted = df_sorted.sort_values("_ano_mes_sort", ascending=True, na_position="last")
+        df_sorted = df_sorted.drop(columns=["_ano_mes_sort"])
+        return df_sorted
+    
+    # Priority 2: DATE column
+    if "DATE" in df.columns:
+        df_copy = df.copy()
+        df_copy["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
+        return df_copy.sort_values("DATE", ascending=True, na_position="last")
+    
+    # Priority 3: Common date column names
+    date_cols = [
+        "DATA DA VENDA",
+        "DATA_PEDIDO",
+        "DATA_NF",
+        "DATA_PREVISTA",
+        "DATA_REPASSE",
+        "EMISS",
+        "DATE",
+    ]
+    
+    for col in date_cols:
+        if col in df.columns:
+            try:
+                df_copy = df.copy()
+                df_copy[col] = pd.to_datetime(df[col], errors="coerce")
+                return df_copy.sort_values(col, ascending=True, na_position="last")
+            except Exception:
+                continue
+    
+    # If no date column found, return unsorted
+    return df
+
+
 def load_excel_if_changed(source_name: str, excel_files: list[Path], data_root: Path) -> Tuple[pd.DataFrame, bool]:
     """
     Load Excel file(s) only if changed, otherwise use cached Parquet.
@@ -126,7 +178,7 @@ def load_excel_if_changed(source_name: str, excel_files: list[Path], data_root: 
         dfs = []
         for excel_file in excel_files:
             try:
-                df = pd.read_excel(excel_file)
+                df = pd.read_excel(excel_file, dtype=str)
                 dfs.append(df)
             except Exception as e:
                 raise IOError(f"❌ Error reading {excel_file}: {e}")
@@ -136,6 +188,9 @@ def load_excel_if_changed(source_name: str, excel_files: list[Path], data_root: 
             df = pd.concat(dfs, ignore_index=True)
         else:
             df = dfs[0]
+        
+        # Sort by date/month in ascending order before saving
+        df = _sort_by_date_month(df)
         
         # Save to cache
         cache_path.parent.mkdir(exist_ok=True)

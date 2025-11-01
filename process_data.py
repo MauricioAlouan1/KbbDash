@@ -66,6 +66,37 @@ def process_O_NFCI(data):
         ### print("Unique values in 'Situação':", data['Situação'].dropna().unique())
         # Remove rows where 'Situação' appears to be blank or any unexpected content
         data = data[data['Situação'].apply(lambda x: x not in [None, '', ' ', np.nan, np.float64])]
+    
+    # Remove specified columns if they exist
+    cols_to_remove = ["Projeto", "CMC Unitário do Movimento", "CMC Total do Movimento"]
+    for col in cols_to_remove:
+        if col in data.columns:
+            data = data.drop(columns=[col])
+    
+    # Rename columns to standardized names
+    rename_map = {
+        "Data de Emissão (completa)" : "Data",
+        "Código do Produto": "CODPF",
+        "Quantidade": "Qt",
+        "Preco Calc": "PMerc_U",
+        "Total de Mercadoria": "PMerc_T",
+        "Valor do ICMS ST": "A_ICMSST_T",
+        "Valor do IPI": "A_IPI_T",
+        "Total da Nota Fiscal": "PNF_T",
+        "Valor do ICMS": "ICMS_T"
+    }
+    # Only rename columns that exist
+    existing_rename_map = {old: new for old, new in rename_map.items() if old in data.columns}
+    if existing_rename_map:
+        data = data.rename(columns=existing_rename_map)
+    
+    # AnoMes should already be added by load_and_clean_data, but ensure it exists
+    # (The value is set in load_and_clean_data for processors in the auto-add list)
+    if 'AnoMes' not in data.columns:
+        # Fallback: if somehow AnoMes wasn't added, we can't add it here without filepath
+        # This should not happen if process_O_NFCI is in the auto-add list
+        pass
+    
     return data
 
 def process_O_CC(data):
@@ -120,6 +151,29 @@ def process_L_LPI(data):
     for col in currency_columns:
         if col in data.columns:
             data[col] = data[col].apply(convert_currency_to_float)
+    
+    # Rename columns to standardized names
+    rename_map = {
+        "Integração": "Integracao",
+        "Preço Com Desconto": "PMerc_T",
+        "Código Pedido": "CodPed",
+        "Status Pedido": "Status",
+        "SKU": "CODPF",
+        "Vendas": "Qt"
+    }
+    # Only rename columns that exist
+    existing_rename_map = {old: new for old, new in rename_map.items() if old in data.columns}
+    if existing_rename_map:
+        data = data.rename(columns=existing_rename_map)
+    
+    # Add calculated column: PMerc_U = PMerc_T/Qt
+    if "PMerc_T" in data.columns and "Qt" in data.columns:
+        # Ensure numeric types
+        data["PMerc_T"] = pd.to_numeric(data["PMerc_T"], errors="coerce")
+        data["Qt"] = pd.to_numeric(data["Qt"], errors="coerce")
+        # Calculate PMerc_U, handling division by zero
+        data["PMerc_U"] = data["PMerc_T"] / data["Qt"].replace(0, pd.NA)
+    
     return data
 
 def detect_encoding_and_delimiter(file_path):
@@ -379,7 +433,6 @@ def process_SHK_Extrato(data):
     data = data[data['Data'].notna()]
     return data
 
-
 def process_MLK_Vendas(data):
     """Process MLK_Vendas files."""
     # Example processing: remove rows where 'N.º de venda' is NaN
@@ -577,7 +630,7 @@ def load_and_clean_data(filepath, processor, header_name, extract_hyperlinks=Fal
          # 🔧 NOVO: normalizar nomes e códigos imediatamente após o carregamento
         data = _normalize_basic(data)
     # Extract month and year from the filename and add as a new column if necessary
-    if processor in [process_B_Estoq, process_O_CtasAPagar, process_O_Estoq, process_KON_RelGeral]:
+    if processor in [process_B_Estoq, process_O_CtasAPagar, process_O_Estoq, process_KON_RelGeral, process_O_NFCI]:
         month_year = int(extract_month_year_from_filename(filepath))
         data['AnoMes'] = month_year
     # Process the data using the specified processor function
