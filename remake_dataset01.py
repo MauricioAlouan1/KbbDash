@@ -22,6 +22,7 @@ import os
 import shutil
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
+from dateutil import parser
 from openpyxl import load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import NamedStyle, Font, PatternFill, Alignment, Border, Side
@@ -81,25 +82,21 @@ static_dir = os.path.join(base_dir, 'Tables')
 
 column_rename_dict = {
     'O_NFCI': {
+        # Note: Many columns already renamed in process_data.py - don't rename them again
+        # Columns already renamed: Data, Qt, PMerc_T, A_ICMSST_T, A_IPI_T, PNF_T, ICMS_T, CODPF, PMerc_U
+        # Only rename columns that weren't renamed in process_data.py:
         'Operação': 'OP',
         'Nota Fiscal': 'NF',
-        'Data de Emissão (completa)': 'EMISS',
         'Cliente (Razão Social)': 'NOMERS',
         'Cliente (Nome Fantasia)': 'NOMEF',
-        'Código do Produto': 'CODPF', 
-        'Quantidade': 'QTD', 
-        'Total de Mercadoria': 'MERCVLR',
-        'Valor do ICMS ST': 'ICMSST',
-        'Valor do IPI': 'IPI',
-        'Total da Nota Fiscal': 'TOTALNF',
-        'Valor do ICMS': 'ICMS',
         'Estado': 'UF'
-        # Add other columns that need renaming for O_NFCI
+        # Add other columns that need renaming for O_NFCI (not already renamed in process_data.py)
     },
      'L_LPI': {
-        'Preço Com Desconto': 'VLRVENDA',
-        'SKU': 'CODPF',
-        'Vendas': 'QTD'
+        # Note: Columns already renamed in process_data.py - don't rename them again
+        # Columns already renamed: Integracao, PMerc_T, CodPed, Status, CODPF, Qt
+        # Only rename columns that weren't renamed in process_data.py:
+        # (no additional renames needed - all handled in process_data.py)
     },
     'MLK_Vendas' : {
         'PREÇO UNITÁRIO DE VENDA DO ANÚNCIO (BRL)': 'PRECOUNIT',
@@ -110,14 +107,14 @@ column_rename_dict = {
 }
 column_format_dict = {
     'O_NFCI': {
-        'EMISS': 'DD-MMM-YY',
-        'QTD': '0',
-        'PRECO CALC': '#,##0.00',
-        'MERCVLR': '#,##0.00',
-        'ICMSST': '#,##0.00',
-        'IPI': '#,##0.00',
-        'TOTALNF': '#,##0.00',
-        'ICMS': '#,##0.00',
+        'Data': 'DD-MMM-YY',  # was EMISS - renamed in process_data.py
+        'Qt': '0',  # was QTD - renamed in process_data.py
+        'PMerc_U': '#,##0.00',  # was PRECO CALC - renamed in process_data.py
+        'PMerc_T': '#,##0.00',  # was MERCVLR - renamed in process_data.py
+        'A_ICMSST_T': '#,##0.00',  # was ICMSST - renamed in process_data.py
+        'A_IPI_T': '#,##0.00',  # was IPI - renamed in process_data.py
+        'PNF_T': '#,##0.00',  # was TOTALNF - renamed in process_data.py
+        'ICMS_T': '#,##0.00',  # was ICMS - renamed in process_data.py
         'ECU': '#,##0.00',
         'COMISSPCT': '0.00%',
         'FRETEPCT': '0.00%',
@@ -130,7 +127,7 @@ column_format_dict = {
         # Add other formats for O_NFCI
     },
     'L_LPI':{
-        'VLRVENDA': '#,##0.00',        
+        'PMerc_T': '#,##0.00',  # was VLRVENDA - renamed in process_data.py        
         'DESCONTO PEDIDO SELLER': '#,##0.00',        
         'FRETE SELLER': '#,##0.00',        
         'ECUK': '#,##0.00',
@@ -878,10 +875,11 @@ def merge_all_data(all_data):
     # Merge O_NFCI with T_GruposCli - G1
     all_data = merge_data(all_data, "O_NFCI", "NomeF", "T_GruposCli", "NomeF", "G1", default_value="V")
 
-    # Merge O_NFCI with ECU on columns 'EMISS' and 'CodPF'
+    # Merge O_NFCI with ECU on columns 'Data' and 'CodPF'
+    # Note: Column renamed from 'EMISS' to 'Data' in process_data.py
     all_data = merge_data_lastcost(all_data, df1_name="O_NFCI",
         df1_product_col="CODPP",
-        df1_date_col="EMISS",
+        df1_date_col="Data",
         df2_name="T_Entradas",
         df2_product_col="PAI",
         df2_date_col="ULTIMA ENTRADA",
@@ -927,9 +925,10 @@ def merge_all_data(all_data):
     all_data = merge_data(all_data, "O_NFCI", "NOMEF", "T_Verbas", "NomeF", "VERBAPCT", default_value=0)
 
     # MP merges
-    all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "Empresa",  default_value='erro')
-    all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "MP",       default_value='erro')
-    all_data = merge_data(all_data, "L_LPI", "INTEGRAÇÃO", "T_MP", "Integração", "EmpresaF", default_value='erro')
+    # Note: Column renamed from 'Integração' to 'Integracao' in process_data.py
+    all_data = merge_data(all_data, "L_LPI", "Integracao", "T_MP", "Integração", "Empresa",  default_value='erro')
+    all_data = merge_data(all_data, "L_LPI", "Integracao", "T_MP", "Integração", "MP",       default_value='erro')
+    all_data = merge_data(all_data, "L_LPI", "Integracao", "T_MP", "Integração", "EmpresaF", default_value='erro')
 
     # OrderStatus
     all_data = merge_data(all_data, "MLA_Vendas", "STATUS", "T_MLStatus", "MLStatus", "OrderStatus", default_value='erro')
@@ -976,28 +975,30 @@ def merge_all_data(all_data):
 
     for key, df in all_data.items():
         if key == 'O_NFCI':
+            # Note: Using new column names from process_data.py
             df['C'] = 1 - df['REM_NF']
             df['B'] = df.apply(lambda row: 1 if row['OP'] == 'REMESSA DE PRODUTO' and row['C'] == 1 else 0, axis=1)
-            df['ECT'] = df['ECU'] * df['QTD'] * df['C']
-            df['COMISSVLR'] = df['MERCVLR'] * df['COMISSPCT'] * df['C']
-            df['FRETEVLR'] = df.apply(lambda row: max(row['FRETEPCT'] * row['TOTALNF'] * row['C'],
+            df['ECT'] = df['ECU'] * df['Qt'] * df['C']  # Qt instead of QTD
+            df['COMISSVLR'] = df['PMerc_T'] * df['COMISSPCT'] * df['C']  # PMerc_T instead of MERCVLR
+            df['FRETEVLR'] = df.apply(lambda row: max(row['FRETEPCT'] * row['PNF_T'] * row['C'],  # PNF_T instead of TOTALNF
                                                       row['FRETEPCT'] * row['ECT'] * row['C'] * 2), axis=1)
-            df['VERBAVLR'] = df['VERBAPCT'] * df['TOTALNF'] * df['C']
-            df['MARGVLR'] = df['C'] * ( df['MERCVLR'] * (1 - 0.0925) - df['ICMS'] ) - df['VERBAVLR'] - df['FRETEVLR'] - df['COMISSVLR'] - df['ECT']
-            df['MARGPCT'] = df['MARGVLR'] / df['MERCVLR']
+            df['VERBAVLR'] = df['VERBAPCT'] * df['PNF_T'] * df['C']  # PNF_T instead of TOTALNF
+            df['MARGVLR'] = df['C'] * ( df['PMerc_T'] * (1 - 0.0925) - df['ICMS_T'] ) - df['VERBAVLR'] - df['FRETEVLR'] - df['COMISSVLR'] - df['ECT']  # PMerc_T instead of MERCVLR, ICMS_T instead of ICMS
+            df['MARGPCT'] = df['MARGVLR'] / df['PMerc_T']  # PMerc_T instead of MERCVLR
 
         elif key == 'L_LPI':
+            # Note: Using new column names from process_data.py
             # make sure join key is string
-            if 'CÓDIGO PEDIDO' in df.columns:
-                df['CÓDIGO PEDIDO'] = df['CÓDIGO PEDIDO'].astype(str).str.strip()
+            if 'CodPed' in df.columns:  # CodPed instead of CÓDIGO PEDIDO
+                df['CodPed'] = df['CodPed'].astype(str).str.strip()
 
             cols_to_drop = ['PREÇO', 'PREÇO TOTAL', 'DESCONTO ITEM', 'DESCONTO TOTAL']
             df = df.drop([x for x in cols_to_drop if x in df.columns], axis=1)
 
             df["MP2"] = df["MP"].str[:2]
-            df['VALIDO'] = df['STATUS PEDIDO'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)
+            df['VALIDO'] = df['Status'].apply(lambda x: 0 if x in ['CANCELADO', 'PENDENTE', 'AGUARDANDO PAGAMENTO'] else 1)  # Status instead of STATUS PEDIDO
             df['KAB'] = df.apply(lambda row: 1 if row['VALIDO'] == 1 and row['EMPRESA'] in ['K', 'A', 'B'] else 0, axis=1)
-            df['ECTK'] = df['ECUK'] * df['QTD'] * df['KAB']
+            df['ECTK'] = df['ECUK'] * df['Qt'] * df['KAB']  # Qt instead of QTD
 
             # ----- TipoAnuncio from MLK_Vendas -----
             if ('MLK_Vendas' in all_data and
@@ -1007,7 +1008,7 @@ def merge_all_data(all_data):
                 print_table_head(all_data, "MLK_Vendas")
                 df = df.merge(
                     all_data['MLK_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
-                    left_on='CÓDIGO PEDIDO',
+                    left_on='CodPed',  # CodPed instead of CÓDIGO PEDIDO
                     right_on='N.º DE VENDA',
                     how='left'
                 )
@@ -1027,7 +1028,7 @@ def merge_all_data(all_data):
                 all_data['MLA_Vendas']['N.º DE VENDA'] = all_data['MLA_Vendas']['N.º DE VENDA'].astype(str).str.strip()
                 df = df.merge(
                     all_data['MLA_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
-                    left_on='CÓDIGO PEDIDO',
+                    left_on='CodPed',  # CodPed instead of CÓDIGO PEDIDO
                     right_on='N.º DE VENDA',
                     how='left'
                 )
@@ -1046,7 +1047,7 @@ def merge_all_data(all_data):
                 all_data['MLB_Vendas']['N.º DE VENDA'] = all_data['MLB_Vendas']['N.º DE VENDA'].astype(str).str.strip()
                 df = df.merge(
                     all_data['MLB_Vendas'][['N.º DE VENDA', 'TIPO DE ANÚNCIO']],
-                    left_on='CÓDIGO PEDIDO',
+                    left_on='CodPed',  # CodPed instead of CÓDIGO PEDIDO
                     right_on='N.º DE VENDA',
                     how='left'
                 )
@@ -1078,9 +1079,9 @@ def merge_all_data(all_data):
                     how='left'
                 )
                 df['ComissPctMp'] = df['TARMP']
-                df['ComissPctVlr'] = df['VLRVENDA'] * df['ComissPctMp'] * -1
+                df['ComissPctVlr'] = df['PMerc_T'] * df['ComissPctMp'] * -1  # PMerc_T instead of VLRVENDA
                 df['FreteFixoVlr'] = df.apply(
-                    lambda row: -row['FRETEFIX'] if row['VLRVENDA'] < row['FFABAIXODE'] else 0,
+                    lambda row: -row['FRETEFIX'] if row['PMerc_T'] < row['FFABAIXODE'] else 0,  # PMerc_T instead of VLRVENDA
                     axis=1
                 )
                 df.drop(columns=['MPX', 'TARMP', 'FFABAIXODE', 'FRETEFIX'], inplace=True)
@@ -1107,20 +1108,20 @@ def merge_all_data(all_data):
                 df.drop(columns=['MP_2L'], inplace=True)
 
             df['Rebate'] = 0.0
-            df['REPASSE'] = df['VLRVENDA'] + df['ComissPctVlr'] + df['FreteFixoVlr'] + df['FreteProdVlr'] + df['Rebate']
+            df['REPASSE'] = df['PMerc_T'] + df['ComissPctVlr'] + df['FreteFixoVlr'] + df['FreteProdVlr'] + df['Rebate']  # PMerc_T instead of VLRVENDA
             df['ImpLP'] = df.apply(
-                lambda row: -0.0925 * row['VLRVENDA'] if row['EMPRESA'] == 'K' else
-                            -0.14   * row['VLRVENDA'] if row['EMPRESA'] == 'A' else
-                            -0.10   * row['VLRVENDA'] if row['EMPRESA'] == 'B' else 0,
+                lambda row: -0.0925 * row['PMerc_T'] if row['EMPRESA'] == 'K' else  # PMerc_T instead of VLRVENDA
+                            -0.14   * row['PMerc_T'] if row['EMPRESA'] == 'A' else  # PMerc_T instead of VLRVENDA
+                            -0.10   * row['PMerc_T'] if row['EMPRESA'] == 'B' else 0,  # PMerc_T instead of VLRVENDA
                 axis=1)
-            df['ImpICMS'] = df.apply(lambda row: -0.18 * row['VLRVENDA'] if row['EMPRESA'] == 'K' else 0, axis=1)
+            df['ImpICMS'] = df.apply(lambda row: -0.18 * row['PMerc_T'] if row['EMPRESA'] == 'K' else 0, axis=1)  # PMerc_T instead of VLRVENDA
             df['ImpTot'] = df['ImpLP'] + df['ImpICMS']
             df['MargVlr'] = df.apply(
                 lambda row: 0 if row['EMPRESA'] == 'NC' else
-                            row['REPASSE'] + row['ImpTot'] - row['ECTK'] - 1 - (0.01)*row['VLRVENDA'] if row['EMPRESA'] == 'K' else
+                            row['REPASSE'] + row['ImpTot'] - row['ECTK'] - 1 - (0.01)*row['PMerc_T'] if row['EMPRESA'] == 'K' else  # PMerc_T instead of VLRVENDA
                             row['REPASSE'] + row['ImpTot'] - 1.6 * row['ECTK'],
                 axis=1)
-            df['MargPct'] = df['MargVlr'] / df['VLRVENDA']
+            df['MargPct'] = df['MargVlr'] / df['PMerc_T']  # PMerc_T instead of VLRVENDA
 
         elif key == 'MLA_Vendas':
             if 'N.º DE VENDA' in df.columns:
@@ -1223,10 +1224,11 @@ def merge_data(all_data, df1_name, df1_col, df2_name, df2_col, new_col=None, ind
         all_data[df1_name] = all_data[df1_name].drop(columns=cols_to_drop)
         df1 = all_data[df1_name]
 
-    # --- Ensure dtype alignment for common numeric-like ids (rollback behavior) ---
-    for colname, frame in ((df1_col, df1), (df2_col, df2)):
-        if colname in frame.columns and colname in ['CÓDIGO PEDIDO', 'N.º DE VENDA']:
-            frame[colname] = frame[colname].astype(str).str.strip()
+        # --- Ensure dtype alignment for common numeric-like ids (rollback behavior) ---
+        # Note: CodPed is the new name from process_data.py (was CÓDIGO PEDIDO)
+        for colname, frame in ((df1_col, df1), (df2_col, df2)):
+            if colname in frame.columns and colname in ['CodPed', 'CÓDIGO PEDIDO', 'N.º DE VENDA']:  # Support both old and new names
+                frame[colname] = frame[colname].astype(str).str.strip()
 
     # Faz o merge
     merged = df1.merge(
@@ -1429,9 +1431,10 @@ def merge_data_sum(all_data, df1_name, df1_col, df2_name, df2_col, new_col, indi
 def compute_NFCI_ANOMES(all_data):
     for key, df in all_data.items():
         # Add the ANOMES column to O_NFCI
-        if key == 'O_NFCI' and 'EMISS' in df.columns:
-            df['EMISS'] = pd.to_datetime(df['EMISS'], errors='coerce')  # Ensure the date is parsed correctly
-            df['ANOMES'] = df['EMISS'].dt.strftime('%y%m')  # Format date as YYMM
+        # Note: Column renamed from 'EMISS' to 'Data' in process_data.py
+        if key == 'O_NFCI' and 'Data' in df.columns:
+            df['Data'] = pd.to_datetime(df['Data'], errors='coerce')  # Ensure the date is parsed correctly
+            df['ANOMES'] = df['Data'].dt.strftime('%y%m')  # Format date as YYMM
             print(f"Added ANOMES column to {key}")
         all_data[key] = df
     return all_data
@@ -1610,29 +1613,31 @@ def excel_autofilters(output_path):
 
 # Define the audit function
 def perform_audit(df, client_name):
+    # Note: Using new column names from process_data.py
     audit_columns = [
         'CODPF',
-        'QTD',
-        'PRECO CALC',
-        'MERCVLR',
-        'ICMSST',
-        'IPI',
-        'TOTALNF',
-        'EMISS']
+        'Qt',  # was QTD
+        'PMerc_U',  # was PRECO CALC
+        'PMerc_T',  # was MERCVLR
+        'A_ICMSST_T',  # was ICMSST
+        'A_IPI_T',  # was IPI
+        'PNF_T',  # was TOTALNF
+        'Data']  # was EMISS
 
     audit_df = df[df['NOMEF'] == client_name][audit_columns]  
     return audit_df
 
 def AuditMP_SH(all_data, mp2, empresa):
+    # Note: Using new column names from process_data.py
     lpi_columns = [
-        'CÓDIGO PEDIDO',
+        'CodPed',  # was CÓDIGO PEDIDO
         'EMPRESA',
         'MP',
         'MP2',
-        'STATUS PEDIDO',
+        'Status',  # was STATUS PEDIDO
         'CODPP',
-        'VLRVENDA',
-        'QTD',
+        'PMerc_T',  # was VLRVENDA
+        'Qt',  # was QTD
         'REPASSE'
     ]
 
@@ -1649,8 +1654,9 @@ def AuditMP_SH(all_data, mp2, empresa):
         print(f"Warning: No matching data found for MP2={mp2} and EMPRESA={empresa}")
 
     # Rename columns
+    # Note: PMerc_T is the new name from process_data.py, renaming to VENDATOTAL for audit
     rename_map = {
-        'VLRVENDA': 'VENDATOTAL',
+        'PMerc_T': 'VENDATOTAL',  # was VLRVENDA
         'REPASSE': 'REPASSEESPERADO_TODOSPEDIDOS'
     }
     dfa.rename(columns=rename_map, inplace=True)
@@ -1659,7 +1665,8 @@ def AuditMP_SH(all_data, mp2, empresa):
     all_data[f'Aud_{mp2}'] = dfa
 
     # Merge with SHK_Extrato
-    all_data = merge_data(all_data, f'Aud_{mp2}', "CÓDIGO PEDIDO", "SHK_Extrato", "ID DO PEDIDO", "VALOR", default_value=0)
+    # Note: CodPed is the new name from process_data.py
+    all_data = merge_data(all_data, f'Aud_{mp2}', "CodPed", "SHK_Extrato", "ID DO PEDIDO", "VALOR", default_value=0)
 
     # Ensure columns exist before renaming
     if 'VALOR' in all_data[f'Aud_{mp2}'].columns:
@@ -1681,15 +1688,16 @@ def AuditMP_SH(all_data, mp2, empresa):
     return all_data
 
 def AuditMP_ML(all_data, mp2, empresa):
+    # Note: Using new column names from process_data.py
     lpi_columns = [
-        'CÓDIGO PEDIDO',
+        'CodPed',  # was CÓDIGO PEDIDO
         'EMPRESA',
         'MP',
         'MP2',
-        'STATUS PEDIDO',
+        'Status',  # was STATUS PEDIDO
         'CODPP',
-        'VLRVENDA',
-        'QTD',
+        'PMerc_T',  # was VLRVENDA
+        'Qt',  # was QTD
         'REPASSE'
     ]
 
@@ -1707,8 +1715,9 @@ def AuditMP_ML(all_data, mp2, empresa):
         print(f"Warning: No matching data found for MP2={mp2} and EMPRESA={empresa}")
 
     # Rename columns
+    # Note: PMerc_T is the new name from process_data.py, renaming to VENDATOTAL for audit
     rename_map = {
-        'VLRVENDA': 'VENDATOTAL',
+        'PMerc_T': 'VENDATOTAL',  # was VLRVENDA
         'REPASSE': 'REPASSEESPERADO_TODOSPEDIDOS'
     }
     dfa.rename(columns=rename_map, inplace=True)
@@ -1716,8 +1725,9 @@ def AuditMP_ML(all_data, mp2, empresa):
     # Store in all_data dictionary
     all_data[f'Aud_{mp2}'] = dfa
 
-    # Merge with SHK_Extrato
-    all_data = merge_data_sum(all_data, f'Aud_{mp2}', "CÓDIGO PEDIDO", "MLK_ExtLib", "ORDER_ID", "NETVALUE", default_value=0)
+    # Merge with MLK_ExtLib
+    # Note: CodPed is the new name from process_data.py
+    all_data = merge_data_sum(all_data, f'Aud_{mp2}', "CodPed", "MLK_ExtLib", "ORDER_ID", "NETVALUE", default_value=0)
 
     # Ensure columns exist before renaming
     if 'NETVALUE' in all_data[f'Aud_{mp2}'].columns:
@@ -1739,15 +1749,16 @@ def AuditMP_ML(all_data, mp2, empresa):
     return all_data
 
 def AuditMP_MA(all_data, mp2, empresa):
+    # Note: Using new column names from process_data.py
     lpi_columns = [
-        'CÓDIGO PEDIDO',
+        'CodPed',  # was CÓDIGO PEDIDO
         'EMPRESA',
         'MP',
         'MP2',
-        'STATUS PEDIDO',
+        'Status',  # was STATUS PEDIDO
         'CODPP',
-        'VLRVENDA',
-        'QTD',
+        'PMerc_T',  # was VLRVENDA
+        'Qt',  # was QTD
         'REPASSE'
     ]
 
@@ -1765,8 +1776,9 @@ def AuditMP_MA(all_data, mp2, empresa):
         print(f"Warning: No matching data found for MP2={mp2} and EMPRESA={empresa}")
 
     # Rename columns
+    # Note: PMerc_T is the new name from process_data.py, renaming to VENDATOTAL for audit
     rename_map = {
-        'VLRVENDA': 'VENDATOTAL',
+        'PMerc_T': 'VENDATOTAL',  # was VLRVENDA
         'REPASSE': 'REPASSEESPERADO_TODOSPEDIDOS'
     }
     dfa.rename(columns=rename_map, inplace=True)
@@ -1774,8 +1786,9 @@ def AuditMP_MA(all_data, mp2, empresa):
     # Store in all_data dictionary
     all_data[f'Aud_{mp2}'] = dfa
 
-    # Merge with SHK_Extrato
-    all_data = merge_data_sum(all_data, f'Aud_{mp2}', "CÓDIGO PEDIDO", "MGK_Extrato", "NÚMERO DO PEDIDO", "VALOR LÍQUIDO ESTIMADO A RECEBER (****)", default_value=0)
+    # Merge with MGK_Extrato
+    # Note: CodPed is the new name from process_data.py
+    all_data = merge_data_sum(all_data, f'Aud_{mp2}', "CodPed", "MGK_Extrato", "NÚMERO DO PEDIDO", "VALOR LÍQUIDO ESTIMADO A RECEBER (****)", default_value=0)
 
     # Ensure columns exist before renaming
     if 'VALOR LÍQUIDO ESTIMADO A RECEBER (****)' in all_data[f'Aud_{mp2}'].columns:
@@ -1839,19 +1852,24 @@ def track_inventory(sales_data, purchase_data):
     # Process purchase data
     for index, row in purchase_data.iterrows():
         movement = {
-            'Date': row['EMISS'],
+            # Note: Column renamed from 'EMISS' to 'Data' in process_data.py
+            'Date': row.get('Data') if 'Data' in purchase_data.columns else row.get('EMISS'),
             'Invoice Number': row['NF'],
             'Product Code': row['CODPF'],
-            'Quantity': row['QTD'],
+            # Note: Column renamed from 'QTD' to 'Qt' in process_data.py
+            'Quantity': row.get('Qt') if 'Qt' in purchase_data.columns else row.get('QTD'),
             'CV': 'C',
             'QTD E': None,
-            'CMV Unit E': row['PRECO CALC'],
-            'CMV Mov E': row['MERCVLR'],
+            # Note: Column renamed from 'PRECO CALC' to 'PMerc_U' in process_data.py
+            'CMV Unit E': row.get('PMerc_U') if 'PMerc_U' in purchase_data.columns else row.get('PRECO CALC'),
+            # Note: Column renamed from 'MERCVLR' to 'PMerc_T' in process_data.py
+            'CMV Mov E': row.get('PMerc_T') if 'PMerc_T' in purchase_data.columns else row.get('MERCVLR'),
             'QTD R': None,
             'CMV Unit R': None,
             'CMV Mov R': None,
             'NF Compra': row['NF'],
-            'Custo Total Unit': row['TOTALNF'] / row['QTD']
+            # Note: Columns renamed: TOTALNF→PNF_T, QTD→Qt in process_data.py
+            'Custo Total Unit': (row.get('PNF_T') if 'PNF_T' in purchase_data.columns else row.get('TOTALNF')) / (row.get('Qt') if 'Qt' in purchase_data.columns else row.get('QTD')) if (row.get('Qt') if 'Qt' in purchase_data.columns else row.get('QTD')) != 0 else 0
         }
         inventory_movements.append(movement)
 
@@ -2078,13 +2096,20 @@ def main(year: int, month: int):
 
     if 'L_LPI' in all_data and not all_data['L_LPI'].empty:
         df_lpi = all_data['L_LPI']
-        if 'CÓDIGO PEDIDO' in df_lpi.columns:
+        # Note: Column renamed from 'CÓDIGO PEDIDO' to 'CodPed' in process_data.py
+        if 'CodPed' in df_lpi.columns:
+            df_lpi['CodPed'] = df_lpi['CodPed'].astype(str).str.strip()
+        elif 'CÓDIGO PEDIDO' in df_lpi.columns:
             df_lpi['CÓDIGO PEDIDO'] = df_lpi['CÓDIGO PEDIDO'].astype(str).str.strip()
         all_data['L_LPI'] = df_lpi
 
     for k, df_any in list(all_data.items()):
-        if df_any is not None and not df_any.empty and 'CÓDIGO PEDIDO' in df_any.columns:
-            all_data[k]['CÓDIGO PEDIDO'] = all_data[k]['CÓDIGO PEDIDO'].astype(str).str.strip()
+        # Note: Support both old and new column names
+        if df_any is not None and not df_any.empty:
+            if 'CodPed' in df_any.columns:
+                all_data[k]['CodPed'] = all_data[k]['CodPed'].astype(str).str.strip()
+            elif 'CÓDIGO PEDIDO' in df_any.columns:
+                all_data[k]['CÓDIGO PEDIDO'] = all_data[k]['CÓDIGO PEDIDO'].astype(str).str.strip()
     # --- end rollback block ---
 
     # ----------------------------------------------------------------------

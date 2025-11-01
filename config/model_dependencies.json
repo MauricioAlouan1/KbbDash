@@ -1,5 +1,6 @@
 {
-  "fact_sales": ["O_NFCI", "L_LPI", "T_CondPagto", "T_Reps"],
+  "fact_sales_b2b": ["O_NFCI", "T_CondPagto", "T_Reps"],
+  "fact_sales_b2c": ["L_LPI"],
   "fact_inventory_positions": ["Conc_Estoque", "T_MP", "T_RegrasMP"],
   "fact_inventory_movements": ["B_EFull", "T_MP", "T_RegrasMP"],
   "fact_forecast": ["Sales_forecast", "T_MP", "T_RegrasMP"],

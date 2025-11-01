@@ -87,8 +87,9 @@ def main():
         print(str(e))
         return 1
     
-    # 3. Process each source
+    # 3. Process each source and track loaded sources
     changed_sources = []
+    loaded_sources = {}  # Track all loaded sources for builders
     
     print("📋 Processing sources...")
     for source_name, source_config in sources_map.items():
@@ -102,6 +103,9 @@ def main():
             # Load with smart caching
             try:
                 df, was_reloaded = load_excel_if_changed(source_name, excel_files, data_root)
+                
+                # Store loaded source for builders
+                loaded_sources[source_name] = df
                 
                 # Track if source changed
                 if was_reloaded:
@@ -134,7 +138,25 @@ def main():
     
     print(f"🔨 Fact tables to rebuild: {', '.join(facts_to_rebuild)}\n")
     
-    # 6. Rebuild fact tables (simulate for now)
+    # 5b. Load all sources needed by fact tables to rebuild
+    # Collect all required sources from dependencies
+    required_sources = set()
+    for fact_name in facts_to_rebuild:
+        if fact_name in dependencies:
+            required_sources.update(dependencies[fact_name])
+    
+    # Load any missing required sources
+    for source_name in required_sources:
+        if source_name not in loaded_sources and source_name in sources_map:
+            try:
+                excel_files = resolve_source_files(sources_map[source_name], data_root)
+                if excel_files:
+                    df, _ = load_excel_if_changed(source_name, excel_files, data_root)
+                    loaded_sources[source_name] = df
+            except Exception as e:
+                print(f"⚠️  Warning: Could not load required source {source_name}: {e}")
+    
+    # 6. Rebuild fact tables using builders
     facts_dir = data_root / "facts"
     facts_dir.mkdir(exist_ok=True)
     
@@ -142,21 +164,47 @@ def main():
         print(f"🔨 Rebuilding {fact_name}...", end=" ", flush=True)
         start_time = time.time()
         
-        # Create empty placeholder DataFrame
-        df = pd.DataFrame()
+        # Try to find and call builder module
+        builder_name = f"build_fact_{fact_name}"
+        try:
+            # Dynamic import of builder module
+            builder_module = __import__(f"builders.{builder_name}", fromlist=[builder_name])
+            builder_func = getattr(builder_module, builder_name)
+            
+            # Call builder with loaded sources
+            df = builder_func(data_root, loaded_sources)
+            
+        except ImportError as e:
+            # Builder module doesn't exist - raise clear error (STRICT)
+            raise ImportError(
+                f"❌ Builder module 'builders.{builder_name}' not found for fact table '{fact_name}'.\n"
+                f"Error: {e}\n"
+                f"Create builders/{builder_name}.py with a {builder_name}() function."
+            )
+        except AttributeError as e:
+            # Builder function doesn't exist - raise clear error (STRICT)
+            raise AttributeError(
+                f"❌ Builder function '{builder_name}' not found in builders.{builder_name}.\n"
+                f"Error: {e}\n"
+                f"Ensure the module exports a function named {builder_name}(data_root, sources)."
+            )
+        except Exception as e:
+            # Re-raise builder errors with context (STRICT - let errors propagate)
+            raise RuntimeError(
+                f"❌ Error building {fact_name} using builders.{builder_name}: {e}"
+            ) from e
         
         # Save as Parquet
         parquet_path = facts_dir / f"{fact_name}.parquet"
         df.to_parquet(parquet_path, index=False)
         
         elapsed = time.time() - start_time
-        time.sleep(0.5)  # Simulate processing time
-        elapsed += 0.5
         
         # Log build
-        log_build(fact_name, "rebuilt", rows=0, seconds=elapsed, data_root=data_root)
+        rows = len(df) if not df.empty else 0
+        log_build(fact_name, "rebuilt", rows=rows, seconds=elapsed, data_root=data_root)
         
-        print("✅")
+        print(f"✅ ({rows} rows)")
     
     print(f"\n✅ Rebuild complete: {len(facts_to_rebuild)} fact table(s) processed")
     return 0
