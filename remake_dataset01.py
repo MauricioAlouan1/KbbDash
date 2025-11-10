@@ -327,6 +327,108 @@ def clean_dataframes(all_data):
 
     return all_data
 
+def split_SKU_lines(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Splits rows where CODPP contains multiple SKUs (separated by ",") into separate rows.
+    - Adds column 'multivenda' = 1 for split rows (original rows do not have this flag)
+    - All other values are duplicated (no value splitting)
+    """
+    print("🔍 Dividindo linhas com múltiplos SKUs (split_SKU_lines)...")
+
+    df = df.copy()
+    df["SKU"] = df["SKU"].astype(str).str.strip()
+
+    split_rows = []
+    rows_split = 0
+
+    for _, row in df.iterrows():
+        sku = [c.strip().upper() for c in row["SKU"].split(",") if c.strip()]
+        if len(sku) <= 1:
+            split_rows.append(row)
+            continue
+
+        for cod in sku:
+            new_row = row.copy()
+            new_row["SKU"] = cod
+            new_row["multivenda"] = 1  # marca como linha dividida
+            split_rows.append(new_row)
+
+        rows_split += 1
+
+    df_out = pd.DataFrame(split_rows).reset_index(drop=True)
+
+    print(f"✅ Split concluído: {rows_split} linhas com múltiplos SKUs foram divididas.")
+    if df_out["SKU"].str.contains(",").any():
+        print(f"⚠️ Ainda há linhas com vírgula em CODPP (possível falha de split).")
+
+    return df_out
+
+def split_SKU_lines_by_cost_ratio(all_data: dict) -> dict:
+    """
+    Para o dataframe all_data["Kon_RelGeral"]:
+    - Localiza linhas com múltiplos SKUs (CODPP com ",")
+    - Divide essas linhas em uma por SKU
+    - Distribui os valores de VALOR_REPASSE, VALOR_PREVISTO e DIFERENCA proporcionalmente ao ECU
+    - As demais colunas são duplicadas
+    - Substitui all_data["Kon_RelGeral"] com o dataframe ajustado
+    """
+    df = all_data["Kon_RelGeral"].copy()
+
+    print("🔧 Aplicando split_SKU_lines_by_cost_ratio...")
+    split_rows = []
+    rows_split = 0
+    skipped = 0
+
+    for _, row in df.iterrows():
+        sku = str(row["SKU"]).split(",")
+        sku = [c.strip().upper() for c in sku if c.strip()]
+        
+        if len(sku) <= 1:
+            split_rows.append(row)
+            continue
+
+        # Obter ECU para cada SKU individual da linha
+        ecus = []
+        for cod in sku:
+            # Buscar o ECU de uma linha que já tenha esse SKU
+            match = df[df["SKU"] == cod]
+            ecu = match["ECU"].values[0] if not match.empty else 1.0
+            try:
+                ecu = float(ecu)
+                if ecu <= 0 or pd.isna(ecu):
+                    ecu = 1.0
+            except:
+                ecu = 1.0
+            ecus.append(ecu)
+
+        total_ecu = sum(ecus)
+        if total_ecu == 0:
+            shares = [1 / len(ecus)] * len(ecus)
+        else:
+            shares = [e / total_ecu for e in ecus]
+
+        for cod, share in zip(sku, shares):
+            new_row = row.copy()
+            new_row["SKU"] = cod
+            # Distribuir valores
+            for col in ["VALOR_REPASSE", "VALOR_PREVISTO", "DIFERENCA"]:
+                if col in new_row and pd.notna(new_row[col]):
+                    new_row[col] = new_row[col] * share
+            # mantém multivenda já definida no split original
+            split_rows.append(new_row)
+
+        rows_split += 1
+
+    df_out = pd.DataFrame(split_rows).reset_index(drop=True)
+
+    print(f"✅ split_SKU_lines_by_cost_ratio: {rows_split} linhas redistribuídas proporcionalmente.")
+    if df_out["CODPP"].str.contains(",").any():
+        print("⚠️ Ainda há linhas com vírgula em CODPP (erro no split).")
+        print(df_out[df_out["CODPP"].str.contains(",")][["CODPP"]].head())
+
+    all_data["Kon_RelGeral"] = df_out
+    return all_data
+
 def build_Kon_Report1(all_data):
     """Generate a pivoted Kon report with totals and percentage rows."""
     if "Kon_RelGeral" not in all_data:
@@ -408,10 +510,9 @@ def build_Kon_Report1(all_data):
 
 def compute_channel_ratios(all_data):
     """
-    Compute per-channel ratios for Taxa-Comissao, Frete, and Outros 
-    based on actual KON_GR values in Kon_RelGeral.
-    Saves results to Kon_Ratios for use in margin and deduction calculations.
-    Also includes absolute totals for auditing (Venda, Taxa, Frete, Outros).
+    Build Kon_Ratios (by CANAL) + Kon_Ratios_T (transposed).
+    - Kon_Ratios now has Desc_total, Venda_liq, and a TOTAL row.
+    - Both tables compute TOTAL percentages from total sums (not sum of per-channel %).
     """
     if "Kon_RelGeral" not in all_data:
         print("⚠️ Kon_RelGeral not found. Skipping ratio computation.")
@@ -422,19 +523,7 @@ def compute_channel_ratios(all_data):
         print("⚠️ Kon_RelGeral empty or missing KON_GR.")
         return all_data
 
-    print("\n🧭 DEBUG: Unique values in KON_GR (first 50):")
-    print(df["KON_GR"].dropna().unique()[:50])
-    print("\n🧭 DEBUG: Unique values in KON_SGR (first 50):")
-    if "KON_SGR" in df.columns:
-        print(df["KON_SGR"].dropna().unique()[:50])
-    else:
-        print("⚠️ KON_SGR column not found in Kon_RelGeral")
-
-    print("df: AAA")
-    print(df.head())
-
-
-    # --- Clean up data ---
+    # Normalize
     df["VALOR_REPASSE"] = pd.to_numeric(df["VALOR_REPASSE"], errors="coerce").fillna(0)
     df["CANAL"] = df["CANAL"].astype(str).str.strip().str.upper()
 
@@ -443,18 +532,17 @@ def compute_channel_ratios(all_data):
 
     for canal in channel_order:
         df_c = df[df["CANAL"] == canal]
-        print(f"\nBBB → inspecting {canal}: {len(df_c)} rows")
         if df_c.empty:
             ratio_rows.append({
                 "CANAL": canal,
-                "Venda_total": 0,
-                "Taxa_total": 0,
-                "Frete_total": 0,
-                "Outros_total": 0,
-                "Taxa_pct": 0,
-                "Frete_pct": 0,
-                "Outros_pct": 0,
-                "Total_pct": 0
+                "Venda_total": 0.0,
+                "Taxa_total": 0.0,
+                "Frete_total": 0.0,
+                "Outros_total": 0.0,
+                "Taxa_pct": 0.0,
+                "Frete_pct": 0.0,
+                "Outros_pct": 0.0,
+                "Total_pct": 0.0
             })
             continue
 
@@ -466,24 +554,21 @@ def compute_channel_ratios(all_data):
         if total_venda == 0:
             ratio_rows.append({
                 "CANAL": canal,
-                "Venda_total": 0,
-                "Taxa_total": 0,
-                "Frete_total": 0,
-                "Outros_total": 0,
-                "Taxa_pct": 0,
-                "Frete_pct": 0,
-                "Outros_pct": 0,
-                "Total_pct": 0
+                "Venda_total": 0.0,
+                "Taxa_total": 0.0,
+                "Frete_total": 0.0,
+                "Outros_total": 0.0,
+                "Taxa_pct": 0.0,
+                "Frete_pct": 0.0,
+                "Outros_pct": 0.0,
+                "Total_pct": 0.0
             })
             continue
 
-        print("df_c: BBB")
-        print(df_c.head())
-
-        taxa_pct  = total_taxa / total_venda
-        frete_pct = total_frete / total_venda
-        outros_pct= total_outros / total_venda
-        total_pct = taxa_pct + frete_pct + outros_pct
+        taxa_pct   = total_taxa  / total_venda
+        frete_pct  = total_frete / total_venda
+        outros_pct = total_outros/ total_venda
+        total_pct  = taxa_pct + frete_pct + outros_pct
 
         ratio_rows.append({
             "CANAL": canal,
@@ -497,64 +582,84 @@ def compute_channel_ratios(all_data):
             "Total_pct": total_pct
         })
 
-        print(f"📊 {canal}: Venda={total_venda:.2f}, "
-              f"Taxa={total_taxa:.2f}, Frete={total_frete:.2f}, Outros={total_outros:.2f} "
-              f"→ Ratios = {taxa_pct:.2%}, {frete_pct:.2%}, {outros_pct:.2%}")
-
+    # === Kon_Ratios base ===
     df_ratios = pd.DataFrame(ratio_rows)
 
-    print("df_ratios: AAA")
-    print(df_ratios.head())
+    # Add Desc_total & Venda_liq
+    df_ratios["Desc_total"] = df_ratios["Taxa_total"] + df_ratios["Frete_total"] + df_ratios["Outros_total"]
+    df_ratios["Venda_liq"]  = df_ratios["Venda_total"] + df_ratios["Desc_total"]  # desc are negative
 
-    all_data["Kon_Ratios"] = df_ratios
+    # Build TOTAL row (values are sums; % recomputed from those sums)
+    tot_Venda  = df_ratios["Venda_total"].sum()
+    tot_Taxa   = df_ratios["Taxa_total"].sum()
+    tot_Frete  = df_ratios["Frete_total"].sum()
+    tot_Outros = df_ratios["Outros_total"].sum()
+    tot_Desc   = df_ratios["Desc_total"].sum()
+    tot_Liq    = df_ratios["Venda_liq"].sum()
 
-    print(f"✅ Kon_Ratios created with {len(df_ratios)} rows.")
+    if tot_Venda != 0:
+        tot_Taxa_pct   = tot_Taxa  / tot_Venda
+        tot_Frete_pct  = tot_Frete / tot_Venda
+        tot_Outros_pct = tot_Outros/ tot_Venda
+        tot_Total_pct  = tot_Desc  / tot_Venda
+    else:
+        tot_Taxa_pct = tot_Frete_pct = tot_Outros_pct = tot_Total_pct = 0.0
 
-    # --- Build transposed summary version of ratios ---
-    df_t = df_ratios.copy()
-
-    # Add Desc_total per channel (Taxa + Frete + Outros)
-    df_t["Desc_total"] = df_t["Taxa_total"] + df_t["Frete_total"] + df_t["Outros_total"]
-
-    # Corrected: Venda_liq = Venda_total + Desc_total
-    # (Desc_total is negative → this effectively subtracts)
-    df_t["Venda_liq"] = df_t["Venda_total"] + df_t["Desc_total"]
-
-    # --- Compute totals correctly ---
     total_row = {
         "CANAL": "TOTAL",
-        "Venda_total": df_t["Venda_total"].sum(),
-        "Taxa_total": df_t["Taxa_total"].sum(),
-        "Frete_total": df_t["Frete_total"].sum(),
-        "Outros_total": df_t["Outros_total"].sum(),
-        "Desc_total": df_t["Desc_total"].sum(),
-        "Venda_liq": df_t["Venda_total"].sum() + df_t["Desc_total"].sum()
+        "Venda_total": tot_Venda,
+        "Taxa_total":  tot_Taxa,
+        "Frete_total": tot_Frete,
+        "Outros_total":tot_Outros,
+        "Taxa_pct":    tot_Taxa_pct,
+        "Frete_pct":   tot_Frete_pct,
+        "Outros_pct":  tot_Outros_pct,
+        "Total_pct":   tot_Total_pct,
+        "Desc_total":  tot_Desc,
+        "Venda_liq":   tot_Liq
     }
 
-    # Recalculate total percentages from total sums (not sum of pct)
-    total_row["Taxa_pct"] = total_row["Taxa_total"] / total_row["Venda_total"]
-    total_row["Frete_pct"] = total_row["Frete_total"] / total_row["Venda_total"]
-    total_row["Outros_pct"] = total_row["Outros_total"] / total_row["Venda_total"]
-    total_row["Total_pct"] = total_row["Desc_total"] / total_row["Venda_total"]
+    df_ratios = pd.concat([df_ratios, pd.DataFrame([total_row])], ignore_index=True)
+    all_data["Kon_Ratios"] = df_ratios
+    print(f"✅ Kon_Ratios created with {len(df_ratios)} rows (incl. TOTAL).")
 
-    # Append total row to ratios table (for reference before transpose)
-    df_t = pd.concat([df_t, pd.DataFrame([total_row])], ignore_index=True)
-
-    # --- Transpose: rows become metrics, columns become CANALs ---
+    # === Kon_Ratios_T (transposed) ===
     df_t = (
-        df_t.set_index("CANAL")
-             .T
-             .rename_axis("METRICA")
-             .reset_index()
+        df_ratios.set_index("CANAL")
+                 .T
+                 .rename_axis("METRICA")
+                 .reset_index()
     )
 
-    # --- Add TOTAL column recomputed from sums ---
-    canal_cols = [c for c in df_t.columns if c not in ("METRICA", "TOTAL")]
-    df_t["TOTAL"] = df_t[canal_cols].sum(axis=1)
+    # Recreate TOTAL column as sum across channels for value metrics…
+    canal_cols = [c for c in df_t.columns if c not in ("METRICA")]
+    if "TOTAL" in canal_cols:
+        canal_cols_no_total = [c for c in canal_cols if c != "TOTAL"]
+    else:
+        canal_cols_no_total = canal_cols
 
-    # --- Optional rounding for presentation ---
-    for c in canal_cols + ["TOTAL"]:
-        df_t[c] = df_t[c].round(2)
+    # First, sum across channels for every row
+    df_t["TOTAL"] = df_t[canal_cols_no_total].select_dtypes(include=["number"]).sum(axis=1)
+
+    # …but FIX percent rows to recompute from totals (not sum of %)
+    pct_map = {
+        "Taxa_pct":   (tot_Taxa,  tot_Venda),
+        "Frete_pct":  (tot_Frete, tot_Venda),
+        "Outros_pct": (tot_Outros,tot_Venda),
+        "Total_pct":  (tot_Desc,  tot_Venda),
+    }
+    for r, (num, den) in pct_map.items():
+        if den == 0:
+            val = 0.0
+        else:
+            val = num / den
+        df_t.loc[df_t["METRICA"] == r, "TOTAL"] = val
+
+    # Optional rounding
+    for c in [c for c in df_t.columns if c != "METRICA"]:
+        df_t[c] = pd.to_numeric(df_t[c], errors="ignore")
+        if df_t[c].dtype.kind in "fc":
+            df_t[c] = df_t[c].round(2)
 
     all_data["Kon_Ratios_T"] = df_t
     print(f"✅ Kon_Ratios_T created with shape: {df_t.shape}")
@@ -776,8 +881,8 @@ def add_unmapped_skus(all_data):
 
 def build_Kon_Detail_SKUAdj(all_data):
     """
-    Create detailed SKU-level cost table combining indirect deductions (Taxa/Frete/Outros)
-    based on per-channel ratios, and calculate gross margin.
+    Create detailed SKU-level cost table combining direct and indirect deductions 
+    (Taxa/Frete/Outros) and calculate gross margin.
     Output sheet: Kon_Detail_SKUAdj
     """
     if "Kon_RelGeral" not in all_data:
@@ -796,48 +901,69 @@ def build_Kon_Detail_SKUAdj(all_data):
             print(f"⚠️ Missing column {c} in Kon_RelGeral.")
             return all_data
 
-    # --- Keep only Venda lines for SKU-level report ---
-    df = df[df["KON_GR"].str.upper() == "VENDA"].copy()
-
-    # --- Ensure numeric values ---
+    # Normalize
     df["VALOR_REPASSE"] = pd.to_numeric(df["VALOR_REPASSE"], errors="coerce").fillna(0)
+    df["KON_GR"] = df["KON_GR"].astype(str).str.upper()
 
-    # --- Add default quantity (proxy 1 per REF_PEDIDO) ---
-    df["REF_PEDIDO"] = df.get("REF_PEDIDO", "")
-    df["QTD"] = 1
+    # --- Calcular valores diretos agrupando por SKU + CANAL + REF_PEDIDO ---
+    group_keys = ["SKU", "CODPP", "CANAL", "REF_PEDIDO"]
 
-    # --- Bring ratios by channel ---
+    df_dir = (
+        df[df["KON_GR"].isin(["TAXA-COMISSAO", "FRETE", "OUTROS"])]
+        .groupby(group_keys + ["KON_GR"])["VALOR_REPASSE"]
+        .sum()
+        .unstack(fill_value=0)
+        .rename(columns={
+            "TAXA-COMISSAO": "Taxa_dir",
+            "FRETE": "Frete_dir",
+            "OUTROS": "Outros_dir"
+        })
+        .reset_index()
+    )
+
+    # --- Selecionar apenas linhas de Venda ---
+    df_base = df[df["KON_GR"] == "VENDA"].copy()
+
+    # --- Add default quantity (proxy 1 por REF_PEDIDO) ---
+    df_base["QTD"] = 1
+
+    # --- Merge valores diretos ---
+    df_base = df_base.merge(df_dir, on=group_keys, how="left")
+    for col in ["Taxa_dir", "Frete_dir", "Outros_dir"]:
+        df_base[col] = df_base[col].fillna(0)
+    df_base["TotDesc_dir"] = df_base["Taxa_dir"] + df_base["Frete_dir"] + df_base["Outros_dir"]
+
+    # --- Trazer ratios por canal (indiretos) ---
     if "Kon_Ratios" in all_data and not all_data["Kon_Ratios"].empty:
         ratios = all_data["Kon_Ratios"].copy()
-        df = df.merge(ratios, on="CANAL", how="left")
+        ratios["CANAL"] = ratios["CANAL"].astype(str).str.upper()
+        df_base["CANAL"] = df_base["CANAL"].astype(str).str.upper()
+        df_base = df_base.merge(ratios, on="CANAL", how="left")
     else:
-        df["Taxa_pct"] = df["Frete_pct"] = df["Outros_pct"] = df["Total_pct"] = 0.0
+        df_base["Taxa_pct"] = df_base["Frete_pct"] = df_base["Outros_pct"] = df_base["Total_pct"] = 0.0
 
-    # --- Calculate indirect deductions per SKU ---
-    df["Taxa_dir"] = df["Frete_dir"] = df["Outros_dir"] = 0.0
-    df["TotDesc_dir"] = 0.0
+    # --- Cálculo deduções indiretas ---
+    df_base["Taxa_ind"]   = -df_base["VALOR_REPASSE"] * df_base["Taxa_pct"].fillna(0)
+    df_base["Frete_ind"]  = -df_base["VALOR_REPASSE"] * df_base["Frete_pct"].fillna(0)
+    df_base["Outros_ind"] = -df_base["VALOR_REPASSE"] * df_base["Outros_pct"].fillna(0)
+    df_base["TotDesc_ind"] = df_base["Taxa_ind"] + df_base["Frete_ind"] + df_base["Outros_ind"]
 
-    df["Taxa_ind"]   = -df["VALOR_REPASSE"] * df["Taxa_pct"].fillna(0)
-    df["Frete_ind"]  = -df["VALOR_REPASSE"] * df["Frete_pct"].fillna(0)
-    df["Outros_ind"] = -df["VALOR_REPASSE"] * df["Outros_pct"].fillna(0)
-    df["TotDesc_ind"] = df["Taxa_ind"] + df["Frete_ind"] + df["Outros_ind"]
+    # --- Totais (direto + indireto) ---
+    df_base["Taxa_tot"]   = df_base["Taxa_dir"] + df_base["Taxa_ind"]
+    df_base["Frete_tot"]  = df_base["Frete_dir"] + df_base["Frete_ind"]
+    df_base["Outros_tot"] = df_base["Outros_dir"] + df_base["Outros_ind"]
+    df_base["TotDesc_tot"] = df_base["TotDesc_dir"] + df_base["TotDesc_ind"]
 
-    # --- Totals ---
-    df["Taxa_tot"] = df["Taxa_dir"] + df["Taxa_ind"]
-    df["Frete_tot"] = df["Frete_dir"] + df["Frete_ind"]
-    df["Outros_tot"] = df["Outros_dir"] + df["Outros_ind"]
-    df["TotDesc_tot"] = df["TotDesc_dir"] + df["TotDesc_ind"]
+    # --- Custo unitário e margem ---
+    df_base["ECU"] = pd.to_numeric(df_base["ECU"], errors="coerce").fillna(0)
+    df_base["Venda"] = df_base["VALOR_REPASSE"]
 
-    # --- Ensure numeric for ECU, QTD, Venda ---
-    df["ECU"] = pd.to_numeric(df["ECU"], errors="coerce").fillna(0)
-    df["QTD"] = pd.to_numeric(df["QTD"], errors="coerce").fillna(1)
-    df["Venda"] = df["VALOR_REPASSE"]
+    df_base["Marg_vlr"] = df_base["Venda"] * (1 - 0.275) - df_base["TotDesc_tot"] - (df_base["ECU"] * df_base["QTD"])
+    df_base["Marg_pct"] = df_base.apply(
+        lambda r: r["Marg_vlr"] / abs(r["Venda"]) if r["Venda"] != 0 else 0, axis=1
+    )
 
-    # --- Margin calculation ---
-    df["Marg_vlr"] = df["Venda"] * (1 - 0.275) - df["TotDesc_tot"] - (df["ECU"] * df["QTD"])
-    df["Marg_pct"] = df.apply(lambda r: r["Marg_vlr"] / r["Venda"] if r["Venda"] != 0 else 0, axis=1)
-
-    # --- Select and order columns ---
+    # --- Selecionar colunas finais ---
     col_order = [
         "SKU", "CODPP", "CANAL", "REF_PEDIDO", "Venda", "QTD",
         "Taxa_dir", "Frete_dir", "Outros_dir", "TotDesc_dir",
@@ -845,10 +971,10 @@ def build_Kon_Detail_SKUAdj(all_data):
         "Taxa_tot", "Frete_tot", "Outros_tot", "TotDesc_tot",
         "ECU", "Marg_vlr", "Marg_pct"
     ]
-    df = df[col_order]
+    df_final = df_base[col_order]
 
-    all_data["Kon_Detail_SKUAdj"] = df
-    print(f"✅ Kon_Detail_SKUAdj created with shape: {df.shape}")
+    all_data["Kon_Detail_SKUAdj"] = df_final
+    print(f"✅ Kon_Detail_SKUAdj created with shape: {df_final.shape}")
     return all_data
 
 def merge_all_data(all_data):
@@ -2118,6 +2244,11 @@ def main(year: int, month: int):
     print("Creating Merged and Calculated Columns")
     all_data = merge_all_data(all_data)
 
+    # --- Split lines with multiple SKUs (before unmapped and ECU calc) ---
+    df = all_data["Kon_RelGeral"].copy()
+    df = split_SKU_lines(df)
+    all_data["Kon_RelGeral"] = df
+
     # --- Add synthetic UNMAPPED SKUs per channel ---
     all_data = add_unmapped_skus(all_data)
 
@@ -2134,8 +2265,10 @@ def main(year: int, month: int):
         new_col_name="ECU",
         default_value=999
     )
+    all_data = split_SKU_lines_by_cost_ratio(all_data)
+
     # --- Build Kon summary ---
-    all_data = build_Kon_Report1(all_data)
+    #all_data = build_Kon_Report1(all_data)
     all_data = compute_channel_ratios(all_data)
     all_data = build_Kon_Detail_SKUAdj(all_data)
 
@@ -2148,7 +2281,7 @@ def main(year: int, month: int):
         "T_CondPagto", "T_Fretes", "T_GruposCli", "T_MP", "T_RegrasMP",
         "T_Remessas", "T_Reps", "T_Verbas", "T_Vol", "T_ProdF", "T_ProdP",
         "T_Entradas", "T_FretesMP", "T_MLStatus", "T_CtasAPagarClass",
-        "T_CtasARecClass", "T_CCCats", "T_KonCats"
+        "T_CtasARecClass", "T_CCCats", "Kon_Report1"
     }
 
     # --- Write each dataframe except excluded ones ---
