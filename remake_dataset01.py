@@ -255,6 +255,17 @@ cols_todrop = {
 audit_client_names = ['ALWE', 'COMPROU CHEGOU', 'NEXT COMPRA']  # Add other clients as needed
 invaudit_client_names = ['ALWE', 'COMPROU CHEGOU', 'NEXT COMPRA']  # Add other clients as needed
 
+def debug_df(all_data, table_name, label):
+    if table_name not in all_data or all_data[table_name].empty:
+        print(f"⚠️ [{label}] Tabela '{table_name}' não encontrada ou vazia.")
+        return all_data
+
+    df = all_data[table_name]
+    print(f"\n🔎 DEBUG {label}: {table_name} shape = {df.shape}")
+    print(f"Columns: {list(df.columns)}")
+    print(df.head(5))
+    return all_data
+
 def rename_columns(all_data, column_rename_dict):
     for df_name, rename_dict in column_rename_dict.items():
         if df_name in all_data:
@@ -329,183 +340,130 @@ def clean_dataframes(all_data):
 
 def split_SKU_lines(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Splits rows where CODPP contains multiple SKUs (separated by ",") into separate rows.
-    - Adds column 'multivenda' = 1 for split rows (original rows do not have this flag)
-    - All other values are duplicated (no value splitting)
+    Divide linhas com múltiplos SKUs contidos na coluna 'SKU' (separados por vírgula).
+    Para cada SKU individual, cria uma nova linha com os mesmos dados.
+    Marca como 'MULTIVENDAS' = 1 e adiciona 'SPLIT_ID' para identificar o grupo original.
+    Também preenche CODPF = SKU para todas as linhas.
     """
     print("🔍 Dividindo linhas com múltiplos SKUs (split_SKU_lines)...")
-
-    df = df.copy()
-    df["SKU"] = df["SKU"].astype(str).str.strip()
-
-    split_rows = []
-    rows_split = 0
+    new_rows = []
+    group_counter = 0
+    split_count = 0
 
     for _, row in df.iterrows():
-        sku = [c.strip().upper() for c in row["SKU"].split(",") if c.strip()]
-        if len(sku) <= 1:
-            split_rows.append(row)
+        sku_raw = row.get("SKU", "")
+        if pd.isna(sku_raw):
+            row["CODPF"] = ""
+            new_rows.append(row)
             continue
 
-        for cod in sku:
+        sku_raw = str(sku_raw).strip()
+        sku_list = [s.strip().upper() for s in sku_raw.split(",") if s.strip()]
+
+        if len(sku_list) <= 1:
+            row["CODPF"] = sku_list[0] if sku_list else ""
+            new_rows.append(row)
+            continue
+
+        split_id = f"SPLIT_{group_counter:04d}"
+        for sku in sku_list:
             new_row = row.copy()
-            new_row["SKU"] = cod
-            new_row["multivenda"] = 1  # marca como linha dividida
-            split_rows.append(new_row)
+            new_row["SKU"] = sku
+            new_row["CODPF"] = sku
+            new_row["MULTIVENDAS"] = 1
+            new_row["SPLIT_ID"] = split_id
+            new_rows.append(new_row)
 
-        rows_split += 1
+        group_counter += 1
+        split_count += 1
 
-    df_out = pd.DataFrame(split_rows).reset_index(drop=True)
+    print(f"✅ Split concluído: {split_count} linhas com múltiplos SKUs foram divididas.")
+    return pd.DataFrame(new_rows)
 
-    print(f"✅ Split concluído: {rows_split} linhas com múltiplos SKUs foram divididas.")
-    if df_out["SKU"].str.contains(",").any():
-        print(f"⚠️ Ainda há linhas com vírgula em CODPP (possível falha de split).")
-
-    return df_out
 
 def split_SKU_lines_by_cost_ratio(all_data: dict) -> dict:
     """
-    Para o dataframe all_data["Kon_RelGeral"]:
-    - Localiza linhas com múltiplos SKUs (CODPP com ",")
-    - Divide essas linhas em uma por SKU
-    - Distribui os valores de VALOR_REPASSE, VALOR_PREVISTO e DIFERENCA proporcionalmente ao ECU
-    - As demais colunas são duplicadas
-    - Substitui all_data["Kon_RelGeral"] com o dataframe ajustado
+    Para linhas marcadas com 'multivenda' e 'split_id':
+    - Redistribui VALOR_REPASSE, VALOR_PREVISTO e DIFERENCA proporcionalmente ao ECU
+    - As demais colunas são mantidas iguais
     """
     df = all_data["Kon_RelGeral"].copy()
 
-    print("🔧 Aplicando split_SKU_lines_by_cost_ratio...")
-    split_rows = []
-    rows_split = 0
-    skipped = 0
+    print("🔧 Aplicando split_SKU_lines_by_cost_ratio (via split_id)...")
+    value_cols = ["VALOR_REPASSE", "VALOR_PREVISTO", "DIFERENCA"]
+    untouched = df[df["MULTIVENDAS"].fillna(0) != 1].copy()
+    to_split = df[df["MULTIVENDAS"].fillna(0) == 1].copy()
 
-    for _, row in df.iterrows():
-        sku = str(row["SKU"]).split(",")
-        sku = [c.strip().upper() for c in sku if c.strip()]
-        
-        if len(sku) <= 1:
-            split_rows.append(row)
-            continue
-
-        # Obter ECU para cada SKU individual da linha
-        ecus = []
-        for cod in sku:
-            # Buscar o ECU de uma linha que já tenha esse SKU
-            match = df[df["SKU"] == cod]
-            ecu = match["ECU"].values[0] if not match.empty else 1.0
-            try:
-                ecu = float(ecu)
-                if ecu <= 0 or pd.isna(ecu):
-                    ecu = 1.0
-            except:
-                ecu = 1.0
-            ecus.append(ecu)
-
-        total_ecu = sum(ecus)
-        if total_ecu == 0:
-            shares = [1 / len(ecus)] * len(ecus)
-        else:
-            shares = [e / total_ecu for e in ecus]
-
-        for cod, share in zip(sku, shares):
-            new_row = row.copy()
-            new_row["SKU"] = cod
-            # Distribuir valores
-            for col in ["VALOR_REPASSE", "VALOR_PREVISTO", "DIFERENCA"]:
-                if col in new_row and pd.notna(new_row[col]):
-                    new_row[col] = new_row[col] * share
-            # mantém multivenda já definida no split original
-            split_rows.append(new_row)
-
-        rows_split += 1
-
-    df_out = pd.DataFrame(split_rows).reset_index(drop=True)
-
-    print(f"✅ split_SKU_lines_by_cost_ratio: {rows_split} linhas redistribuídas proporcionalmente.")
-    if df_out["CODPP"].str.contains(",").any():
-        print("⚠️ Ainda há linhas com vírgula em CODPP (erro no split).")
-        print(df_out[df_out["CODPP"].str.contains(",")][["CODPP"]].head())
-
-    all_data["Kon_RelGeral"] = df_out
-    return all_data
-
-def build_Kon_Report1(all_data):
-    """Generate a pivoted Kon report with totals and percentage rows."""
-    if "Kon_RelGeral" not in all_data:
-        print("⚠️ Kon_RelGeral not found. Skipping summary.")
+    if "SPLIT_ID" not in to_split.columns:
+        print("⚠️ Nenhuma coluna 'SPLIT_ID' encontrada nas linhas multivenda.")
+        all_data["Kon_RelGeral"] = df
         return all_data
 
-    df = all_data["Kon_RelGeral"].copy()
-    required_cols = ["CANAL", "VALOR_REPASSE", "KON_GR", "KON_SGR"]
-    for c in required_cols:
-        if c not in df.columns:
-            print(f"⚠️ Missing column {c} in Kon_RelGeral. Skipping summary.")
-            return all_data
+    result = []
+    grouped = to_split.groupby("SPLIT_ID")
+    print(f"🔢 Total de grupos para redistribuir: {len(grouped)}")
 
-    # --- filter out unwanted groups ---
-    df = df[~df["KON_GR"].isin(["Saldo", "Saque"])]
+    for split_id, group in grouped:
+        group = group.copy()
+        ecus = group["ECU"].replace(0, 1).fillna(1)
+        total_ecu = ecus.sum()
 
-    # --- aggregate ---
-    pivot = (
-        df.groupby(["KON_GR", "KON_SGR", "CANAL"], as_index=False)["VALOR_REPASSE"]
-          .sum()
-    )
+        if total_ecu == 0:
+            shares = [1 / len(group)] * len(group)
+        else:
+            shares = ecus / total_ecu
 
-    # --- pivot channels into columns ---
-    pivot = pivot.pivot_table(
-        index=["KON_GR", "KON_SGR"],
-        columns="CANAL",
-        values="VALOR_REPASSE",
-        aggfunc="sum",
-        fill_value=0
-    ).reset_index()
+        for col in value_cols:
+            if col in group.columns:
+                base_val = group[col].sum()
+                group[col] = shares * base_val
 
-    # --- ensure fixed channel columns ---
-    channel_order = ["Amazon", "Magazine Luiza", "Mercado Livre", "Shopee"]
-    for ch in channel_order:
-        if ch not in pivot.columns:
-            pivot[ch] = 0
+        result.append(group)
 
-    # --- reorder columns and add TOTAL ---
-    pivot = pivot[["KON_GR", "KON_SGR"] + channel_order]
-    pivot["TOTAL"] = pivot[channel_order].sum(axis=1)
+    df_final = pd.concat([untouched] + result, ignore_index=True)
+    print(f"✅ Redistribuição aplicada a {len(grouped)} grupos de multivenda.")
+    all_data["Kon_RelGeral"] = df_final
+    return all_data
 
-    # --- enforce logical order ---
-    order_main = ["Venda", "Taxa-Comissao", "Frete", "Outros"]
-    order_sub = ["Bloq-Desbloq", "Devolucao", "Full", "Mkt", "Promo-Rebate", "Impostos Retidos"]
-    pivot["KON_GR"] = pd.Categorical(pivot["KON_GR"], categories=order_main, ordered=True)
-    pivot["KON_SGR"] = pd.Categorical(pivot["KON_SGR"], categories=order_sub, ordered=True)
-    pivot = pivot.sort_values(["KON_GR", "KON_SGR"], na_position="last").reset_index(drop=True)
+def build_all_ratio_versions(all_data):
+    """
+    Gera 3 versões do Kon_Ratios e Kon_Ratios_T:
+    A. Total (todas as linhas)
+    B. Mapped (CODPP != "")
+    C. Unmapped (CODPP == "")
 
-    # --- add totals per KON_GR (summing all subgroups) ---
-    totals_by_group = (
-        pivot.groupby("KON_GR")[channel_order + ["TOTAL"]].sum().reset_index()
-    )
-    totals_by_group["KON_SGR"] = ""
-    pivot = pd.concat([pivot, totals_by_group], ignore_index=True)
+    Salva nas chaves:
+        - Kon_Ratios
+        - Kon_Ratios_T
+        - Kon_Ratios_MAPPED
+        - Kon_Ratios_T_MAPPED
+        - Kon_Ratios_UNMAPPED
+        - Kon_Ratios_T_UNMAPPED
+    """
+    from copy import deepcopy
 
-    # --- compute overall totals ---
-    venda_tot   = totals_by_group[totals_by_group["KON_GR"] == "Venda"][channel_order + ["TOTAL"]].sum()
-    taxa_tot    = totals_by_group[totals_by_group["KON_GR"] == "Taxa-Comissao"][channel_order + ["TOTAL"]].sum()
-    frete_tot   = totals_by_group[totals_by_group["KON_GR"] == "Frete"][channel_order + ["TOTAL"]].sum()
-    outros_tot  = totals_by_group[totals_by_group["KON_GR"] == "Outros"][channel_order + ["TOTAL"]].sum()
+    df_all = all_data["Kon_RelGeral"]
+    mask_mapped = df_all["CODPP"].astype(str).str.strip() != ""
+    mask_unmapped = ~mask_mapped
 
-    # --- create bottom summary rows ---
-    venda_liq = venda_tot - (taxa_tot + frete_tot + outros_tot)
+    # A. Total
+    all_data = compute_channel_ratios(all_data)
 
-    pct_rows = pd.DataFrame([
-        ["Venda Líquida", "", *venda_liq.values],
-        ["Taxa_pct", "", *(taxa_tot.values / venda_tot.values * 100)],
-        ["Frete_pct", "", *(frete_tot.values / venda_tot.values * 100)],
-        ["Outros_pct", "", *(outros_tot.values / venda_tot.values * 100)],
-        ["Liquido_pct", "", *(venda_liq.values / venda_tot.values * 100)]
-    ], columns=["KON_GR", "KON_SGR"] + channel_order + ["TOTAL"])
+    # B. Mapped
+    temp = deepcopy(all_data)
+    temp["Kon_RelGeral"] = df_all[mask_mapped].copy()
+    temp = compute_channel_ratios(temp)
+    all_data["Kon_Ratios_MAPPED"] = temp["Kon_Ratios"]
+    all_data["Kon_Ratios_T_MAPPED"] = temp["Kon_Ratios_T"]
 
-    # --- concatenate report ---
-    final_report = pd.concat([pivot, pct_rows], ignore_index=True)
+    # C. Unmapped
+    temp = deepcopy(all_data)
+    temp["Kon_RelGeral"] = df_all[mask_unmapped].copy()
+    temp = compute_channel_ratios(temp)
+    all_data["Kon_Ratios_UNMAPPED"] = temp["Kon_Ratios"]
+    all_data["Kon_Ratios_T_UNMAPPED"] = temp["Kon_Ratios_T"]
 
-    all_data["Kon_Report1"] = final_report
-    print(f"✅ Kon_Report1 created with shape: {final_report.shape}")
+    print("✅ Versões Total, MAPPED e UNMAPPED geradas com sucesso.")
     return all_data
 
 def compute_channel_ratios(all_data):
@@ -1087,17 +1045,6 @@ def merge_all_data(all_data):
         new_col="KON_SGR",
         default_value="Outros"
     )
-    # Kon_RelGeral joins with T_ProdF to get CODPP from SKU = CODPF
-    all_data = merge_data(all_data,
-        df1_name="Kon_RelGeral",
-        df1_col="SKU",
-        df2_name="T_ProdF",
-        df2_col="CODPF",
-        new_col="CODPP",
-        default_value=""
-    )
-
-
 
     for key, df in all_data.items():
         if key == 'O_NFCI':
@@ -2245,12 +2192,26 @@ def main(year: int, month: int):
     all_data = merge_all_data(all_data)
 
     # --- Split lines with multiple SKUs (before unmapped and ECU calc) ---
+    #all_data = debug_df(all_data, "Kon_RelGeral", "AAAAA")
     df = all_data["Kon_RelGeral"].copy()
     df = split_SKU_lines(df)
     all_data["Kon_RelGeral"] = df
+    #all_data = debug_df(all_data, "Kon_RelGeral", "BBBBB")
+
+    # Kon_RelGeral joins with T_ProdF to get CODPP from SKU = CODPF
+    all_data = merge_data(all_data,
+        df1_name="Kon_RelGeral",
+        df1_col="CODPF",
+        df2_name="T_ProdF",
+        df2_col="CODPF",
+        new_col="CODPP",
+        default_value=""
+    )
+    #all_data = debug_df(all_data, "Kon_RelGeral", "CCCCC")
 
     # --- Add synthetic UNMAPPED SKUs per channel ---
-    all_data = add_unmapped_skus(all_data)
+    #all_data = add_unmapped_skus(all_data)
+    #all_data = debug_df(all_data, "Kon_RelGeral", "DELTA")
 
     # --- Add last cost (ECU) lookup directly on Kon_RelGeral ---
     all_data = merge_data_lastcost(
@@ -2263,13 +2224,16 @@ def main(year: int, month: int):
         df2_date_col="ULTIMA ENTRADA",
         df2_cost_col="ULT CU R$",
         new_col_name="ECU",
-        default_value=999
+        default_value=0
     )
+    #all_data = debug_df(all_data, "Kon_RelGeral", "ECO")
     all_data = split_SKU_lines_by_cost_ratio(all_data)
+    #all_data = debug_df(all_data, "Kon_RelGeral", "FOX")
 
     # --- Build Kon summary ---
     #all_data = build_Kon_Report1(all_data)
-    all_data = compute_channel_ratios(all_data)
+    #all_data = compute_channel_ratios(all_data)
+    all_data = build_all_ratio_versions(all_data)
     all_data = build_Kon_Detail_SKUAdj(all_data)
 
 
@@ -2281,7 +2245,8 @@ def main(year: int, month: int):
         "T_CondPagto", "T_Fretes", "T_GruposCli", "T_MP", "T_RegrasMP",
         "T_Remessas", "T_Reps", "T_Verbas", "T_Vol", "T_ProdF", "T_ProdP",
         "T_Entradas", "T_FretesMP", "T_MLStatus", "T_CtasAPagarClass",
-        "T_CtasARecClass", "T_CCCats", "Kon_Report1"
+        "T_CtasARecClass", "T_CCCats", "Kon_Report1", "MLK_ExtLib", "SHK_Extrato", "MGK_Pacotes", 
+        "MGK_Extrato", "MLA_Vendas" 
     }
 
     # --- Write each dataframe except excluded ones ---
