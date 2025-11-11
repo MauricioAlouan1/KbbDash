@@ -28,6 +28,8 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import NamedStyle, Font, PatternFill, Alignment, Border, Side
 import argparse
 import re
+import numpy as np
+
 
 def _select_year_month():
     parser = argparse.ArgumentParser(add_help=False)
@@ -424,6 +426,54 @@ def split_SKU_lines_by_cost_ratio(all_data: dict) -> dict:
     print(f"✅ Redistribuição aplicada a {len(grouped)} grupos de multivenda.")
     all_data["Kon_RelGeral"] = df_final
     return all_data
+
+def build_Kon_Final_Report(all_data):
+    """
+    Cria relatório final combinando os dados MAPPED + UNMAPPED:
+    - Base: Kon_Ratios_T_MAPPED
+    - Acrescenta: Unmapped_total, Unmapped_pct
+    - Recalcula: Desc_total, Venda_liq
+    - Salva em: all_data["Kon_Ratios_FINAL"]
+    """
+    df_mapped = all_data["Kon_Ratios_T_MAPPED"].copy()
+    df_unmapped = all_data["Kon_Ratios_T_UNMAPPED"].copy()
+
+    # Extrai linhas chave
+    venda_total = df_mapped[df_mapped["METRICA"] == "Venda_total"].set_index("METRICA")
+    venda_liq_mapped = df_mapped[df_mapped["METRICA"] == "Venda_liq"].set_index("METRICA")
+    unmapped_total = df_unmapped[df_unmapped["METRICA"] == "Venda_liq"].set_index("METRICA")
+
+    # Preenche faltantes com 0
+    unmapped_total = unmapped_total.reindex(columns=venda_total.columns, fill_value=0)
+
+    # Unmapped_pct = Unmapped_total / Venda_total
+    unmapped_pct = unmapped_total.values / venda_total.replace(0, np.nan).values
+    unmapped_pct = pd.DataFrame(unmapped_pct, columns=venda_total.columns, index=["Unmapped_pct"]).fillna(0)
+
+    # Desc_final = Venda_total - (Venda_liq_mapped + Unmapped_total)
+    venda_liq_final = venda_liq_mapped.values + unmapped_total.values
+    desc_final = venda_total.values - venda_liq_final
+
+    venda_liq_final_df = pd.DataFrame(venda_liq_final, columns=venda_total.columns, index=["Venda_liq"])
+    desc_final_df = pd.DataFrame(desc_final, columns=venda_total.columns, index=["Desc_total"])
+
+    # Monta resultado final
+    df_final = pd.concat([
+        venda_total,
+        df_mapped[df_mapped["METRICA"].isin([
+            "Taxa_total", "Frete_total", "Outros_total", "Taxa_pct", "Frete_pct", "Outros_pct", "Total_pct"
+        ])].set_index("METRICA"),
+        unmapped_total.rename(index={"Venda_liq": "Unmapped_total"}),
+        unmapped_pct,
+        desc_final_df,
+        venda_liq_final_df
+    ])
+
+    df_final.reset_index(inplace=True)
+    all_data["Kon_Ratios_FINAL"] = df_final
+    print(f"✅ Kon_Ratios_FINAL created with shape: {df_final.shape}")
+    return all_data
+
 
 def build_all_ratio_versions(all_data):
     """
@@ -2234,6 +2284,8 @@ def main(year: int, month: int):
     #all_data = build_Kon_Report1(all_data)
     #all_data = compute_channel_ratios(all_data)
     all_data = build_all_ratio_versions(all_data)
+    all_data = build_Kon_Final_Report(all_data)
+
     all_data = build_Kon_Detail_SKUAdj(all_data)
 
 
