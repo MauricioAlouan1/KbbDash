@@ -57,12 +57,12 @@ SHEET_LLPI   = "L_LPI"
 # PT01 (estoque)
 
 # O_NFCI (vendas 2b)
-ONFCI_QTY_COL  = "QTD"                  # ex.: "QT", "Quantidade", "QTD"
+ONFCI_QTY_COL  = "QT"                  # ex.: "QT", "Quantidade", "QT"
 
 # L_LPI (vendas 2c)
 LLPI_CODE_COL    = "CODPP"
-LLPI_QTY_COL     = "QTD"
-LLPI_STATUS_COL  = "STATUS PEDIDO"     # usado para filtrar != "CANCELADO"
+LLPI_QTY_COL     = "QT"
+LLPI_STATUS_COL  = "STATUS"     # usado para filtrar != "CANCELADO"
 LLPI_EMPRESA_COL = "EMPRESA"           # usado para filtrar == "K"
 
 # Filtragem por mês:
@@ -233,14 +233,14 @@ def load_sales_onfci(resumo_path: Path) -> pd.DataFrame:
 
     # Convert and clean
     df["CODPP"] = df["CODPP"].astype(str).str.strip().str.upper()
-    df["QTD"] = pd.to_numeric(df.get("QTD", 0), errors="coerce").fillna(0)
-    df["MERCVLR"] = pd.to_numeric(df.get("MERCVLR", 0), errors="coerce").fillna(0)
+    df["QT"] = pd.to_numeric(df.get("QT", 0), errors="coerce").fillna(0)
+    df["PMERC_T"] = pd.to_numeric(df.get("PMERC_T", 0), errors="coerce").fillna(0)
     df["MARGVLR"] = pd.to_numeric(df.get("MARGVLR", 0), errors="coerce").fillna(0)
 
     out = pd.DataFrame({
         "CODPP": df["CODPP"],
-        "VENDAS_2b": df["QTD"],
-        "VV_2b": df["MERCVLR"],
+        "VENDAS_2b": df["QT"],
+        "VV_2b": df["PMERC_T"],
         "Mrg_2b": df["MARGVLR"]
     })
 
@@ -277,20 +277,20 @@ def load_sales_llpi(resumo_path: Path) -> pd.DataFrame:
         df = df[df["CODPP"].astype(str).str.upper() != "GRAND TOTAL"]
 
     # Apply filters
-    if "STATUS PEDIDO" in df.columns and "EMPRESA" in df.columns:
-        df = df[df["STATUS PEDIDO"].astype(str).str.upper() != "CANCELADO"]
+    if "STATUS" in df.columns and "EMPRESA" in df.columns:
+        df = df[df["STATUS"].astype(str).str.upper() != "CANCELADO"]
         df = df[df["EMPRESA"].astype(str).str.upper() == "K"]
 
     # Normalize and convert numerics
     df["CODPP"] = df["CODPP"].astype(str).str.strip().str.upper()
-    df["QTD"] = pd.to_numeric(df.get("QTD", 0), errors="coerce").fillna(0)
-    df["VLRVENDA"] = pd.to_numeric(df.get("VLRVENDA", 0), errors="coerce").fillna(0)
+    df["QT"] = pd.to_numeric(df.get("QT", 0), errors="coerce").fillna(0)
+    df["PMERC_T"] = pd.to_numeric(df.get("PMERC_T", 0), errors="coerce").fillna(0)
     df["MargVlr"] = pd.to_numeric(df.get("MargVlr", 0), errors="coerce").fillna(0)
 
     out = pd.DataFrame({
         "CODPP": df["CODPP"],
-        "VENDAS_2c": df["QTD"],
-        "VV_2c": df["VLRVENDA"],
+        "VENDAS_2c": df["QT"],
+        "VV_2c": df["PMERC_T"],
         "Mrg_2c": df["MargVlr"]
     })
 
