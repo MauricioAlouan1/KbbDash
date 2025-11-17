@@ -178,7 +178,7 @@ def calculate_qtsp_from_resumo(base_dir: str, year: int, month: int) -> pd.DataF
     try:
         df_nfci = pd.read_excel(resumo_path, sheet_name="O_NFCI")
         df_nfci["CODPP"] = df_nfci["CODPP"].astype(str).str.upper().str.strip()
-        df_nfci["QTD_B"] = pd.to_numeric(df_nfci["QTD"], errors="coerce").fillna(0)
+        df_nfci["QTD_B"] = pd.to_numeric(df_nfci["QT"], errors="coerce").fillna(0)
         df_nfci["ANOMES"] = pd.to_numeric(df_nfci["ANOMES"], errors="coerce")
         df_nfci = df_nfci[df_nfci["ANOMES"] == ano_mes]
         vendas.append(df_nfci[["CODPP", "QTD_B"]])
@@ -190,10 +190,10 @@ def calculate_qtsp_from_resumo(base_dir: str, year: int, month: int) -> pd.DataF
     # ─────────────────────────────
     try:
         df_lpi = pd.read_excel(resumo_path, sheet_name="L_LPI")
-        df_lpi = df_lpi[df_lpi["STATUS PEDIDO"].astype(str).str.upper() != "CANCELADO"]
+        df_lpi = df_lpi[df_lpi["STATUS"].astype(str).str.upper() != "CANCELADO"]
         df_lpi = df_lpi[df_lpi["EMPRESA"].astype(str).str.upper() == "K"]
         df_lpi["CODPP"] = df_lpi["CODPP"].astype(str).str.upper().str.strip()
-        df_lpi["QTD_C"] = pd.to_numeric(df_lpi["QTD"], errors="coerce").fillna(0)
+        df_lpi["QTD_C"] = pd.to_numeric(df_lpi["QT"], errors="coerce").fillna(0)
         df_lpi["ANOMES"] = pd.to_numeric(df_lpi["ANOMES"], errors="coerce")
         df_lpi = df_lpi[df_lpi["ANOMES"] == ano_mes]
         vendas.append(df_lpi[["CODPP", "QTD_C"]])
