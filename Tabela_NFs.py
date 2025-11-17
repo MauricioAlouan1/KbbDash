@@ -9,8 +9,8 @@ YEAR = "2025"
 MONTH = "10-Outubro"
 
 # Define base folder and available series
-#BASE_FOLDER = "/Users/mauricioalouan/Dropbox/nfs"
-BASE_FOLDER = "/Users/simon/Library/CloudStorage/Dropbox/nfs"
+BASE_FOLDER = "/Users/mauricioalouan/Dropbox/nfs"
+#BASE_FOLDER = "/Users/simon/Library/CloudStorage/Dropbox/nfs"
 SERIES_LIST = [
     "Serie 1 - Omie",
     "Serie 2 - filial",
