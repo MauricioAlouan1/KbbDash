@@ -12,7 +12,7 @@ Inputs (auto-resolved from 2 candidate base folders):
 
 Output:
 CSV + Excel with columns:
-CODPF, QT_I, CU_I, CT_I, VENDAS_2b, VENDAS_2c, Qt_E, CU_E, CT_E, Qt_SS, CU_F, CT_Ger
+CODPF, QT_I, CU_I, CT_I, VQt_2b, VQt_2c, Qt_E, CU_E, CT_E, Qt_SS, CU_F, CT_Ger
 """
 
 from __future__ import annotations
@@ -239,13 +239,13 @@ def load_sales_onfci(resumo_path: Path) -> pd.DataFrame:
 
     out = pd.DataFrame({
         "CODPP": df["CODPP"],
-        "VENDAS_2b": df["QT"],
+        "VQt_2b": df["QT"],
         "VV_2b": df["PMERC_T"],
         "Mrg_2b": df["MARGVLR"]
     })
 
     onfci_out = out.groupby("CODPP", as_index=False).agg({
-        "VENDAS_2b": "sum",
+        "VQt_2b": "sum",
         "VV_2b": "sum",
         "Mrg_2b": "sum"
     })
@@ -289,13 +289,13 @@ def load_sales_llpi(resumo_path: Path) -> pd.DataFrame:
 
     out = pd.DataFrame({
         "CODPP": df["CODPP"],
-        "VENDAS_2c": df["QT"],
+        "VQt_2c": df["QT"],
         "VV_2c": df["PMERC_T"],
         "Mrg_2c": df["MargVlr"]
     })
 
     lpi_out = out.groupby("CODPP", as_index=False).agg({
-        "VENDAS_2c": "sum",
+        "VQt_2c": "sum",
         "VV_2c": "sum",
         "Mrg_2c": "sum"
     })
@@ -332,8 +332,8 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
     # --- load base data ---
     inv_prev = load_prev_inventory_data(prev_inv_path)    # CODPP, Qt_I, CU_I, CT_I
     inv_this = load_curr_inventory_data(this_inv_path)    # CODPP, Qt_SS, CU_F, CT_F, Qt_E, CU_E, CU_S, PGE
-    vendas_b = load_sales_onfci(resumo_path)              # CODPP, VENDAS_2b, VV_2b, Mrg_2b
-    vendas_c = load_sales_llpi(resumo_path)               # CODPP, VENDAS_2c, VV_2c, Mrg_2c
+    vendas_b = load_sales_onfci(resumo_path)              # CODPP, VQt_2b, VV_2b, Mrg_2b
+    vendas_c = load_sales_llpi(resumo_path)               # CODPP, VQt_2c, VV_2c, Mrg_2c
     prodf    = load_prodf(tables_dir)                     # CODPP, CODPF (estrutura)
 
     # normalize keys
@@ -360,14 +360,14 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
 
     # num fills
     num_cols = ["Qt_I","CT_I","CU_I","Qt_SS","CU_F","CT_F","Qt_E","CU_E","CU_S",
-                "VENDAS_2b","VENDAS_2c","VV_2b","VV_2c","Mrg_2b","Mrg_2c"]
+                "VQt_2b","VQt_2c","VV_2b","VV_2c","Mrg_2b","Mrg_2c"]
     for c in num_cols:
         if c in dp.columns:
             dp[c] = pd.to_numeric(dp[c], errors="coerce").fillna(0)
 
     # vendas & margens
-    dp["VENDAS_tot"] = dp.get("VENDAS_2b", 0) + dp.get("VENDAS_2c", 0)
-    dp["Qt_S"]       = dp["VENDAS_tot"]
+    dp["VQt_tot"] = dp.get("VQt_2b", 0) + dp.get("VQt_2c", 0)
+    dp["Qt_S"]       = dp["VQt_tot"]
     dp["VV_tot"]     = dp.get("VV_2b", 0) + dp.get("VV_2c", 0)
     dp["Mrg_tot"]    = dp.get("Mrg_2b", 0) + dp.get("Mrg_2c", 0)
 
@@ -417,7 +417,7 @@ def reconcile_inventory(year: int, month: int) -> pd.DataFrame:
         "Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS", "Qt_Diff", #"Qt_Ger",
         "CT_I", "CT_E", "CT_S", "CT_SE", "CT_SS", "CT_Diff", #"CT_Ger",
         "CU_I", "CU_E", "CU_S", "CU_F",
-        "VENDAS_2b", "VENDAS_2c", "VENDAS_tot",
+        "VQt_2b", "VQt_2c", "VQt_tot",
         "VV_2b", "VV_2c", "VV_tot",
         "Mrg_2b", "Mrg_2c", "Mrg_tot",
         "MrgPct_2b", "MrgPct_2c", "MrgPct_tot",
@@ -452,11 +452,11 @@ def apply_excel_formatting(ws, df, wb):
         "MrgPct_2b": 6, "MrgPct_2c": 6, "MrgPct_tot": 6,
 
         # Vendas
-        "VENDAS_2b": 9, "VENDAS_2c": 9, "VENDAS_tot": 9,
+        "VQt_2b": 9, "VQt_2c": 9, "VQt_tot": 9,
     }
 
     # --- Base formats ---
-    qt_blue   = wb.add_format({'num_format': '#,##0',   'bg_color': '#DDEBF7'})
+    qt_blue   = wb.add_format({'num_format': '#,##0',   'bg_color': "#5592C8"})
     qt_gray   = wb.add_format({'num_format': '#,##0',   'bg_color': "#E3EEF7"})
     ct_orange = wb.add_format({'num_format': '#,##0.00','bg_color': "#D7A167"})
     ct_gray   = wb.add_format({'num_format': '#,##0.00','bg_color': "#E3EEF7"})
@@ -471,7 +471,7 @@ def apply_excel_formatting(ws, df, wb):
     lightblue_money   = wb.add_format({'num_format': '#,##0.00', 'bg_color': '#BDD7EE'})  # for CT_Aj / CT_AjF
 
     # --- Column groups ---
-    qt_blue_cols  = {"Qt_I","Qt_E","Qt_S","Qt_SE","Qt_SS"}
+    qt_blue_cols  = {"Qt_I","Qt_E","Qt_S","Qt_SE","Qt_SS","VQt_2b","VQt_2c","VQt_tot"}
     qt_gray_cols  = {"Qt_Diff","Qt_Ger"}
     ct_orange_cols= {"CT_I","CT_E","CT_S","CT_SE","CT_SS"}
     ct_gray_cols  = {"CT_Diff","CT_Ger"}
@@ -479,7 +479,7 @@ def apply_excel_formatting(ws, df, wb):
     blue_cols     = {"VV_2b","VV_2c","VV_tot"}  # VV_tot same style
     green_cols    = {"Mrg_2b","Mrg_2c","Mrg_tot"}
     pct_cols      = {"MrgPct_2b","MrgPct_2c","MrgPct_tot"}
-    orange_cols   = {"VENDAS_2b","VENDAS_2c","VENDAS_tot"}
+    orange_cols   = {}
     aj_int_cols   = {"Qt_Aj","Qt_AjF"}
     aj_money_cols = {"CT_Aj","CT_AjF"}
 
@@ -713,7 +713,7 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
         "CODPP", "Ins", "Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS", "Qt_Diff", "Qt_Ger",
         "CT_I", "CT_E", "CT_S", "CT_SE", "CT_SS", "CT_Diff", "CT_Ger",
         "CU_I", "CU_E", "CU_S", "CU_F",
-        "VENDAS_2b", "VENDAS_2c", "VENDAS_tot",
+        "VQt_2b", "VQt_2c", "VQt_tot",
         "VV_2b", "VV_2c", "VV_tot",
         "Mrg_2b", "Mrg_2c", "Mrg_tot",
         "MrgPct_2b", "MrgPct_2c", "MrgPct_tot"
