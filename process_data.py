@@ -120,15 +120,33 @@ def process_O_Estoq(data):
     return data
 
 def process_B_Estoq(data):
-    """Process B_Estoq files: convert number formats in 'Quantidade', remove rows with 'Quantidade' = 0, and remove the last row."""
+    """Process B_Estoq files safely regardless of xlsx or xls format."""
     if not data.empty:
-        # Convert 'Quantidade' column to correct numeric format, considering "." as thousands separator and "," as decimal
-        data['Quantidade'] = data['Quantidade'].replace(r'\.', '', regex=True).replace(',', '.', regex=True).astype(float)        
-        # Remove rows where 'Quantidade' is 0
-        data = data[data['Quantidade'] != 0]        
-        # Remove the last row of the DataFrame
+
+        col = 'Quantidade'
+
+        # Se já for numérico (xls geralmente é), não mexer
+        if not pd.api.types.is_numeric_dtype(data[col]):
+
+            # Só aplica substituições se for string
+            data[col] = (
+                data[col]
+                .astype(str)
+                .str.replace(r'\.', '', regex=True)
+                .str.replace(',', '.', regex=True)
+            )
+
+        # Agora converte para float de forma segura
+        data[col] = pd.to_numeric(data[col], errors="coerce")
+
+        # Remove quantidade = 0
+        data = data[data[col] != 0]
+
+        # Remove last row
         data = data.iloc[:-1]
+
     return data
+
 
 def process_T_EstTrans(data):
     """Process O_Estoq files: adapt this function to meet specific requirements."""

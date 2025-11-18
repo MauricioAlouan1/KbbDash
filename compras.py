@@ -4,7 +4,7 @@ from pathlib import Path
 
 # ⚙️ Configurações
 ANO = 2025
-MES = 4
+MES = 10
 COBERTURA_MINIMA = 30
 
 # 📂 Caminhos possíveis
@@ -39,19 +39,19 @@ estoque = estoque.rename(columns={
 
 # 🛒 Vendas O_NFCI
 vendas_nfci = (
-    o_nfci.groupby(["CODPF", "ANOMES"])["QTD"]
+    o_nfci.groupby(["CODPF", "ANOMES"])["QT"]
     .sum()
     .reset_index()
-    .rename(columns={"QTD": "VENDAS_NFCI"})
+    .rename(columns={"QT": "VENDAS_NFCI"})
 )
 
 # 🛒 Vendas L_LPI (KAB == 1)
 l_lpi_filtered = l_lpi[l_lpi["KAB"] == 1]
 vendas_lpi = (
-    l_lpi_filtered.groupby(["CODPF", "ANOMES"])["QTD"]
+    l_lpi_filtered.groupby(["CODPF", "ANOMES"])["QT"]
     .sum()
     .reset_index()
-    .rename(columns={"QTD": "VENDAS_LPI"})
+    .rename(columns={"QT": "VENDAS_LPI"})
 )
 
 # 🔄 Combina as vendas

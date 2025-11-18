@@ -713,7 +713,7 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
         "CODPP", "Ins", "Qt_I", "Qt_E", "Qt_S", "Qt_SE", "Qt_SS", "Qt_Diff", "Qt_Ger",
         "CT_I", "CT_E", "CT_S", "CT_SE", "CT_SS", "CT_Diff", "CT_Ger",
         "CU_I", "CU_E", "CU_S", "CU_F",
-        "VQt_2b", "VQt_2c", "VQt_tot",
+        "VENDAS_2b", "VENDAS_2c", "VENDAS_tot",
         "VV_2b", "VV_2c", "VV_tot",
         "Mrg_2b", "Mrg_2c", "Mrg_tot",
         "MrgPct_2b", "MrgPct_2c", "MrgPct_tot"
