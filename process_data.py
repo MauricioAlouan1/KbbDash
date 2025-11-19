@@ -217,32 +217,27 @@ def detect_encoding_and_delimiter(file_path):
 
 def process_KON_RelGeral(data):
     """
-    Light pre-processing for Kon_RelGeral_*:
-    - Normalize columns, types
-    - Add flags/keys (HasSKU, OrderKey, AnoMes)
-    - (Optional) Attach small category dictionary (T_KonCats.xlsx)
+    Pré-processamento do Kon_RelGeral:
+    - Normalização
+    - Explode de OBS_LANCAMENTO (antes do merge)
+    - Linhas SALDO e DIFERENÇA
+    - Merge com T_KonCats no final
     """
-    # Basic normalization
+
+    # -------- 1) NORMALIZAÇÃO BÁSICA ----------
     data = _normalize_basic(data).copy()
 
-    # Keep only the “Extrato Geral” sheet columns we actually need (safe default: keep all)
-    # If you want to trim, uncomment and adjust:
-    # keep_cols = ['CONCILIACAO','ID','REF_PEDIDO','CANAL','CONTA','DATA_PEDIDO','NUM_NF','DATA_NF',
-    #              'SKU','DATA_PREVISTA','DATA_REPASSE','TP_LANCAMENTO','VALOR_PREVISTO','VALOR_REPASSE',
-    #              'DIFERENCA','ETAPA','OBS_LANCAMENTO','CATEGORIA_LANCAMENTO']
-    # data = data[[c for c in keep_cols if c in data.columns]]
-
-    # Dates → datetime (best-effort)
+    # Datas → datetime
     for dc in ['DATA_PEDIDO','DATA_NF','DATA_PREVISTA','DATA_REPASSE']:
         if dc in data.columns:
             data[dc] = pd.to_datetime(data[dc], errors='coerce')
 
-    # Numeric money fields (fill missing with 0.0)
+    # Campos numéricos
     for mc in ['VALOR_PREVISTO','VALOR_REPASSE','DIFERENCA']:
         if mc in data.columns:
             data[mc] = pd.to_numeric(data[mc], errors='coerce').fillna(0.0)
 
-    # SKU normalize + flag
+    # SKU normalize
     if 'SKU' in data.columns:
         data['SKU'] = data['SKU'].astype(str).str.strip()
         data['SKU'] = data['SKU'].replace({'nan': pd.NA, '': pd.NA})
@@ -250,27 +245,100 @@ def process_KON_RelGeral(data):
     else:
         data['HasSKU'] = False
 
-    # Order key
+    # OrderKey
     if 'REF_PEDIDO' in data.columns:
         data['OrderKey'] = data['REF_PEDIDO'].astype(str).str.strip()
     else:
         data['OrderKey'] = pd.NA
 
-    # AnoMes (use filename, like other processors)
-    # Note: AnoMes is YYMM string, consistent with your pipeline
+    # AnoMes (já vem do load_and_clean_data)
     if 'AnoMes' not in data.columns:
-        data['AnoMes'] = extract_month_year_from_filename("Kon_RelGeral_XXXX_YY.xlsx")  # placeholder
-    # The real AnoMes is set in load_and_clean_data() after reading filename.
-    # To ensure it is, we’ll add it post-load in load_and_clean_data() section below.
+        data['AnoMes'] = extract_month_year_from_filename("Kon_RelGeral_XXXX_YY.xlsx")
 
-    # OPTIONAL light join: attach category dictionary
+
+    # --------------------------------------------------------------------
+    # -------- 2) EXPLODE OBS_LANCAMENTO (ANTES DO MERGE) ---------------
+    # --------------------------------------------------------------------
+    if {"CANAL", "TP_LANCAMENTO", "OBS_LANCAMENTO", "VALOR_REPASSE"}.issubset(data.columns):
+
+        df_target = data[
+            (data["CANAL"].astype(str).str.upper() == "MERCADO LIVRE") &
+            (data["TP_LANCAMENTO"].astype(str).str.upper() == "DESPESAS DE SERVIÇOS")
+        ].copy()
+
+        import re
+
+        def extract_value(txt):
+            m = re.search(r"R\$?\s*([\d\.\,]+)", txt)
+            if m:
+                num = m.group(1).replace(".", "").replace(",", ".")
+                try:
+                    return float(num)
+                except:
+                    return None
+            return None
+
+        def clean_category(txt):
+            txt = re.sub(r"(?i)despesas referentes a", "", txt)
+            txt = re.sub(r"R\$?\s*[\d\.\,]+", "", txt)
+            txt = re.sub(r"\s{2,}", " ", txt)
+            return txt.strip(" -")
+
+        new_rows = []
+        diff_rows = []
+
+        for idx, row in df_target.iterrows():
+
+            parts = str(row["OBS_LANCAMENTO"]).split(" + ")
+
+            extracted_vals = []
+            extracted_cats = []
+
+            for part in parts:
+                valor = extract_value(part)
+                categoria = clean_category(part)
+
+                extracted_vals.append(valor)
+                extracted_cats.append(categoria)
+
+                nrow = row.copy()
+                nrow["OBS_LANCAMENTO"] = categoria
+                nrow["TP_LANCAMENTO"] = "DESPESAS DE SERVIÇOS"
+                new_rows.append(nrow)
+
+            soma_itens = sum([v for v in extracted_vals if v is not None])
+            valor_original = row["VALOR_REPASSE"]
+            diferenca = valor_original - soma_itens
+
+            # Linha original vira SALDO
+            data.loc[idx, "TP_LANCAMENTO"] = "SALDO"
+
+            # Criar linha de diferença se necessário
+            if abs(diferenca) > 0.02:
+                adj = row.copy()
+                adj["TP_LANCAMENTO"] = "DIFERENCA DE SOMA"
+                adj["OBS_LANCAMENTO"] = "AJUSTE AUTOMATICO"
+                adj["VALOR_REPASSE"] = diferenca
+                diff_rows.append(adj)
+
+        # Inserir novas linhas
+        if new_rows:
+            data = pd.concat([data, pd.DataFrame(new_rows)], ignore_index=True)
+
+        # Inserir linhas de diferença
+        if diff_rows:
+            data = pd.concat([data, pd.DataFrame(diff_rows)], ignore_index=True)
+
+
+    # --------------------------------------------------------------------
+    # -------- 3) MERGE COM T_KonCats  (DEPOIS DO EXPLODE) --------------
+    # --------------------------------------------------------------------
     try:
         tpath = os.path.join(base_dir, 'Tables', 'T_KonCats.xlsx')
         if os.path.exists(tpath):
             tcat = pd.read_excel(tpath)
-            # Normalize dictionary column names
             tcat = _normalize_basic(tcat)
-            # Expected columns in your file: TP_Lancamento, TP_Lancamento_Grupo, TP_Lancamento_Gr1
+
             if 'TP_LANCAMENTO' in data.columns and 'TP_Lancamento' in tcat.columns:
                 data = data.merge(
                     tcat[['TP_Lancamento','TP_Lancamento_Grupo','TP_Lancamento_Gr1']],
@@ -278,17 +346,17 @@ def process_KON_RelGeral(data):
                     right_on='TP_Lancamento',
                     how='left'
                 )
-                # Clean up after merge
-                if 'TP_Lancamento' in data.columns:
-                    data.drop(columns=['TP_Lancamento'], inplace=True)
-            # Fill any unmapped rows
+                data.drop(columns=['TP_Lancamento'], inplace=True)
+
             for col in ['TP_Lancamento_Grupo','TP_Lancamento_Gr1']:
                 if col in data.columns:
                     data[col] = data[col].fillna('ZZZ')
+
     except Exception as e:
         print(f"⚠️ Could not attach T_KonCats.xlsx: {e}")
 
     return data
+
 
 def process_MGK_Pacotes_CSV(file_path):
     """Process MGK_Pacotes CSV files by handling encoding, delimiter, and data formatting."""
