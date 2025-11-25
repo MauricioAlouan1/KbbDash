@@ -262,26 +262,37 @@ def process_KON_RelGeral(data):
     # --------------------------------------------------------------------
     if {"CANAL", "TP_LANCAMENTO", "OBS_LANCAMENTO", "VALOR_REPASSE"}.issubset(data.columns):
 
-        df_target = data[
-            (data["CANAL"].astype(str).str.upper() == "MERCADO LIVRE") &
-            (data["TP_LANCAMENTO"].astype(str).str.upper() == "DESPESAS DE SERVIÇOS")
-        ].copy()
+        # Só Mercado Livre + DESPESAS DE SERVIÇOS
+        mask = (
+            data["CANAL"].astype(str).str.upper().eq("MERCADO LIVRE")
+            & data["TP_LANCAMENTO"].astype(str).str.upper().eq("DESPESAS DE SERVIÇOS")
+        )
+        df_target = data[mask].copy()
 
         import re
 
-        def extract_value(txt):
-            m = re.search(r"R\$?\s*([\d\.\,]+)", txt)
-            if m:
-                num = m.group(1).replace(".", "").replace(",", ".")
-                try:
-                    return float(num)
-                except:
-                    return None
-            return None
+        def extract_value(txt: str):
+            """Pega o número depois de R$ no texto."""
+            m = re.search(r"R\$?\s*([\d\.\,]+)", str(txt))
+            if not m:
+                return None
+            num = m.group(1).replace(".", "").replace(",", ".")
+            try:
+                return float(num)
+            except Exception:
+                return None
 
-        def clean_category(txt):
+        def clean_category(txt: str):
+            """
+            Remove 'despesas referentes a' e o valor,
+            deixando só algo como:
+              'CAMPANHAS DE PUBLICIDADE - PRODUCT ADS'
+              'TARIFA PELO SERVIÇO DE ARMAZENAMENTO FULL'
+              'TARIFA DE MANUTENÇÃO DA MINHA PÁGINA'
+            """
+            txt = str(txt)
             txt = re.sub(r"(?i)despesas referentes a", "", txt)
-            txt = re.sub(r"R\$?\s*[\d\.\,]+", "", txt)
+            txt = re.sub(r"R\$?\s*[\d\.\,]+", "", txt)  # tira o valor
             txt = re.sub(r"\s{2,}", " ", txt)
             return txt.strip(" -")
 
@@ -289,46 +300,61 @@ def process_KON_RelGeral(data):
         diff_rows = []
 
         for idx, row in df_target.iterrows():
+            original_total = float(row.get("VALOR_REPASSE", 0) or 0)
 
-            parts = str(row["OBS_LANCAMENTO"]).split(" + ")
+            # Se não tiver valor, pula
+            if original_total == 0:
+                continue
 
-            extracted_vals = []
-            extracted_cats = []
+            # Sinal do lançamento (normalmente negativo)
+            sign = -1.0 if original_total < 0 else 1.0
+
+            texto = str(row["OBS_LANCAMENTO"] or "")
+            parts = [p.strip() for p in texto.split(" + ") if p.strip()]
+
+            soma_partes = 0.0
 
             for part in parts:
                 valor = extract_value(part)
-                categoria = clean_category(part)
+                if valor is None:
+                    continue
 
-                extracted_vals.append(valor)
-                extracted_cats.append(categoria)
+                categoria = clean_category(part)
+                valor_assinado = sign * valor  # mantém o mesmo sinal do total
+
+                soma_partes += valor_assinado
 
                 nrow = row.copy()
+                # 🔹 Aqui vai o valor específico daquela parte
+                nrow["VALOR_REPASSE"] = valor_assinado
+                # 🔹 Categoria nova vai em TP_LANCAMENTO (para merge depois)
+                nrow["TP_LANCAMENTO"] = categoria
+                # Pode deixar o OBS igual à categoria também
                 nrow["OBS_LANCAMENTO"] = categoria
-                nrow["TP_LANCAMENTO"] = "DESPESAS DE SERVIÇOS"
+
                 new_rows.append(nrow)
 
-            soma_itens = sum([v for v in extracted_vals if v is not None])
-            valor_original = row["VALOR_REPASSE"]
-            diferenca = valor_original - soma_itens
+            # Linha original vira só um SALDO "zerado" (não entra na soma)
+            data.loc[idx, "TP_LANCAMENTO"] = "Valor Explodido"
 
-            # Linha original vira SALDO
-            data.loc[idx, "TP_LANCAMENTO"] = "SALDO"
-
-            # Criar linha de diferença se necessário
-            if abs(diferenca) > 0.02:
+            # Diferença entre o total original e a soma das partes
+            diff = original_total - soma_partes
+            if abs(diff) > 0.02:
                 adj = row.copy()
-                adj["TP_LANCAMENTO"] = "DIFERENCA DE SOMA"
-                adj["OBS_LANCAMENTO"] = "AJUSTE AUTOMATICO"
-                adj["VALOR_REPASSE"] = diferenca
+                adj["VALOR_REPASSE"] = diff
+                # 🔹 Categoria da diferença também entra em TP_LANCAMENTO
+                adj["TP_LANCAMENTO"] = "AJUSTE AUTOMATICO"
+                adj["OBS_LANCAMENTO"] = "DIFERENCA DE SOMA"
                 diff_rows.append(adj)
 
-        # Inserir novas linhas
+        # Inserir novas linhas explodidas
         if new_rows:
             data = pd.concat([data, pd.DataFrame(new_rows)], ignore_index=True)
 
-        # Inserir linhas de diferença
+        # Inserir linhas de ajuste (quando a soma não bater)
         if diff_rows:
             data = pd.concat([data, pd.DataFrame(diff_rows)], ignore_index=True)
+
 
 
     # --------------------------------------------------------------------
@@ -342,14 +368,14 @@ def process_KON_RelGeral(data):
 
             if 'TP_LANCAMENTO' in data.columns and 'TP_Lancamento' in tcat.columns:
                 data = data.merge(
-                    tcat[['TP_Lancamento','TP_Lancamento_Grupo','TP_Lancamento_Gr1']],
+                    tcat[['TP_Lancamento','Kon_Gr','Kon_SGr']],
                     left_on='TP_LANCAMENTO',
                     right_on='TP_Lancamento',
                     how='left'
                 )
                 data.drop(columns=['TP_Lancamento'], inplace=True)
 
-            for col in ['TP_Lancamento_Grupo','TP_Lancamento_Gr1']:
+            for col in ['Kon_Gr','Kon_SGr']:
                 if col in data.columns:
                     data[col] = data[col].fillna('ZZZ')
 
