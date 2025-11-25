@@ -355,7 +355,23 @@ def process_KON_RelGeral(data):
         if diff_rows:
             data = pd.concat([data, pd.DataFrame(diff_rows)], ignore_index=True)
 
+    # --------------------------------------------------------------------
+    # -------- 2.5) TRATAR DIFAL (ANTES DO MERGE) ------------------------
+    # --------------------------------------------------------------------
+    if {"CANAL", "TP_LANCAMENTO", "OBS_LANCAMENTO"}.issubset(data.columns):
 
+        mask_difal = (
+            data["CANAL"].astype(str).str.upper().eq("MERCADO LIVRE")
+            & data["TP_LANCAMENTO"].astype(str).str.upper().eq("PAGAMENTO DE DESPESAS")
+            & data["OBS_LANCAMENTO"].astype(str).str.upper().str.contains(
+                r"DIFAL|IMPOSTO INTERESTADUAL|DIFERENÇA DA ALÍQUOTA",
+                regex=True,
+                na=False
+            )
+        )
+
+        # Update TP_LANCAMENTO to DIFAL
+        data.loc[mask_difal, "TP_LANCAMENTO"] = "DIFAL"
 
     # --------------------------------------------------------------------
     # -------- 3) MERGE COM T_KonCats  (DEPOIS DO EXPLODE) --------------
