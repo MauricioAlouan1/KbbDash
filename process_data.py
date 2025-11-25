@@ -104,6 +104,7 @@ def process_O_CC(data):
     # Assuming 'Valor (R$)' is in column F and needs to be non-zero
     data['Valor (R$)'] = pd.to_numeric(data['Valor (R$)'], errors='coerce')  # Ensure numeric
     data = data[data['Valor (R$)'] != 0]  # Remove rows where 'Valor (R$)' is zero
+    data = data[data['Situação'] != "Atrasado"]  # Remove rows where 'Situaçao' = 'Atrasado'
     return data
 
 def process_O_CtasAPagar(data):
