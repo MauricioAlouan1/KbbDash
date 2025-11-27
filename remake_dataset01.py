@@ -2178,8 +2178,8 @@ def Kon_FixSums(all_data):
             "CATEGORIA_LANCAMENTO": "AJUSTE",
             "ANOMES": current_anomes,
             "HASSKU": False,
-            "KON_GR": "Outros",
-            "KON_SGR": "Bloq-Desbloq",
+            "KON_GR": "AJUSTE",
+            "KON_SGR": "AJUSTE DE SALDO",
         })
 
     # -------------------------------------------------------------
@@ -2239,6 +2239,7 @@ def Kon_MatchTransfers(all_data):
 
         # 4. CREATE NEW ROW
         new_rows.append({
+            "CONCILIACAO": "zzz",
             "CANAL": canal,
             "VALOR_REPASSE": diff,
             "TP_LANCAMENTO": "Diff de Saques",
