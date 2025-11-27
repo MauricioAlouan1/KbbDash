@@ -304,7 +304,8 @@ def load_static_data(static_dir, filename):
 def standardize_text_case(df):
     """Convert all text to uppercase for standardization."""
     if isinstance(df, pd.DataFrame):
-        df.columns = [col.upper() for col in df.columns]
+        df = df.copy()  # avoid chained assignment issues
+        df.columns = [str(col).strip().upper() for col in df.columns]
         for col in df.select_dtypes(include=[object]).columns:
             df[col] = df[col].str.upper()
     return df
@@ -2079,6 +2080,185 @@ def perform_all_invaudits(all_data):
 
     return all_data
 
+def Kon_FixSums(all_data):
+
+    df = all_data["Kon_RelGeral"].copy()
+    saldos_raw = all_data["T_SaldosCC"].copy()
+
+    # -------------------------------------------------------------
+    # 1. REMOVE EXISTING SALDO LINES
+    # -------------------------------------------------------------
+    df = df[df["KON_GR"].astype(str).str.upper() != "SALDO"]
+
+    # -------------------------------------------------------------
+    # 2. PREPARE KON DATA
+    # -------------------------------------------------------------
+    df["VALOR_REPASSE"] = pd.to_numeric(df["VALOR_REPASSE"], errors="coerce").fillna(0)
+    current_anomes = df["ANOMES"].max()
+
+    # -------------------------------------------------------------
+    # 3. RESHAPE T_SaldosCC (wide → long)
+    # -------------------------------------------------------------
+    saldos = saldos_raw.melt(
+        id_vars=["CONTA"],
+        var_name="ANOMES",
+        value_name="SALDO"
+    )
+
+    saldos["ANOMES"] = pd.to_numeric(saldos["ANOMES"], errors="coerce")
+    saldos["SALDO"] = pd.to_numeric(saldos["SALDO"], errors="coerce").fillna(0)
+
+    # -------------------------------------------------------------
+    # 4. WORK ONLY WITH MARKETPLACES
+    # -------------------------------------------------------------
+    canais_validos = ["MERCADO LIVRE", "SHOPEE", "AMAZON", "MAGAZINE LUIZA"]
+
+    saldos = saldos[saldos["CONTA"].str.upper().isin([c.upper() for c in canais_validos])]
+
+    # map table names → channel names in Kon_RelGeral
+    canal_map = {
+        "MERCADO LIVRE": "MERCADO LIVRE",
+        "SHOPEE": "SHOPEE",
+        "AMAZON": "AMAZON",
+        "MAGAZINE LUIZA": "MAGAZINE LUIZA"
+    }
+
+    saldos["CANAL"] = saldos["CONTA"].str.upper().map(
+        {k.upper(): v for k, v in canal_map.items()}
+    )
+
+    # -------------------------------------------------------------
+    # 5. FIND PREVIOUS ANOMES
+    # -------------------------------------------------------------
+    prev_candidates = sorted(saldos["ANOMES"].unique())
+    prev_candidates = [x for x in prev_candidates if x < current_anomes]
+    prev_anomes = max(prev_candidates) if prev_candidates else None
+
+    new_rows = []
+
+    # -------------------------------------------------------------
+    # 6. PROCESS EACH MARKETPLACE
+    # -------------------------------------------------------------
+    for canal in canal_map.values():
+
+        # saldo atual
+        atual_saldo = saldos[
+            (saldos["CANAL"] == canal) &
+            (saldos["ANOMES"] == current_anomes)
+        ]["SALDO"].sum()
+
+        # saldo anterior
+        if prev_anomes:
+            prev_saldo = saldos[
+                (saldos["CANAL"] == canal) &
+                (saldos["ANOMES"] == prev_anomes)
+            ]["SALDO"].sum()
+        else:
+            prev_saldo = 0
+
+        saldo_diff = atual_saldo - prev_saldo
+
+        # soma de movimentos (Kon_RelGeral)
+        movimento_sum = df[df["CANAL"] == canal]["VALOR_REPASSE"].sum()
+
+        # quanto falta
+        ajuste = saldo_diff - movimento_sum
+
+        if abs(ajuste) < 0.01:
+            continue
+
+        # ---------------------------------------------------------
+        # 7. CREATE THE AJUSTE ROW
+        # ---------------------------------------------------------
+        new_rows.append({
+            "CONCILIACAO": "zzz",
+            "CANAL": canal,
+            "TP_LANCAMENTO": f"Ajuste de Saldo [{canal}]",
+            "VALOR_REPASSE": ajuste,
+            "CATEGORIA_LANCAMENTO": "AJUSTE",
+            "ANOMES": current_anomes,
+            "HASSKU": False,
+            "KON_GR": "Outros",
+            "KON_SGR": "Bloq-Desbloq",
+        })
+
+    # -------------------------------------------------------------
+    # 8. APPEND RESULTS
+    # -------------------------------------------------------------
+    if new_rows:
+        df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
+
+    all_data["Kon_RelGeral"] = df
+    return all_data
+
+def Kon_MatchTransfers(all_data):
+
+    df_kon = all_data["Kon_RelGeral"].copy()
+    df_cc  = all_data["O_CC"].copy()
+
+    # -------------------------------------------------------------
+    # PREP
+    # -------------------------------------------------------------
+    df_kon["VALOR_REPASSE"] = pd.to_numeric(df_kon["VALOR_REPASSE"], errors="coerce").fillna(0)
+    df_cc["VALOR (R$)"] = pd.to_numeric(df_cc["VALOR (R$)"], errors="coerce").fillna(0)
+
+    current_anomes = df_kon["ANOMES"].max()
+
+    # mapping of channels → CC account name in O_CC
+    cc_map = {
+        "AMAZON": "AMAZON BR",
+        "MAGAZINE LUIZA": "MAGALU PAY",
+        "MERCADO LIVRE": "MERCADO PAGO",
+        "SHOPEE": "SHOPEE",
+    }
+
+    new_rows = []
+
+    # -------------------------------------------------------------
+    # PROCESS EACH CHANNEL
+    # -------------------------------------------------------------
+    for canal, cc_account in cc_map.items():
+
+        # 1. SAQUES from Kon_RelGeral
+        kon_saque = df_kon[
+            (df_kon["CANAL"].astype(str).str.upper() == canal) &
+            (df_kon["KON_GR"].astype(str).str.upper() == "SAQUE")
+        ]["VALOR_REPASSE"].sum()
+
+        # 2. TRANSF from O_CC
+        cc_transf = df_cc[
+            (df_cc["CONTA CORRENTE"].astype(str).str.upper() == cc_account.upper()) &
+            (df_cc["CC_CAT GRP"].astype(str).str.upper() == "TRANSF")
+        ]["VALOR (R$)"].sum()
+
+        # 3. DIFF
+        diff = cc_transf - kon_saque
+
+        if abs(diff) < 0.01:
+            continue
+
+        # 4. CREATE NEW ROW
+        new_rows.append({
+            "CANAL": canal,
+            "VALOR_REPASSE": diff,
+            "TP_LANCAMENTO": "Diff de Saques",
+            "CATEGORIA_LANCAMENTO": "Diff de Saques",
+            "ANOMES": current_anomes,
+            "HASSKU": False,
+            "KON_GR": "SAQUE",
+            "KON_SGR": "Ajuste de Saque por CC",
+        })
+
+    # -------------------------------------------------------------
+    # APPEND NEW ROWS IF ANY
+    # -------------------------------------------------------------
+    if new_rows:
+        df_kon = pd.concat([df_kon, pd.DataFrame(new_rows)], ignore_index=True)
+
+    all_data["Kon_RelGeral"] = df_kon
+    return all_data
+
+
 def main(year: int, month: int):
     """
     Build R_Resumo for the selected (year, month).
@@ -2182,6 +2362,7 @@ def main(year: int, month: int):
         "T_CtasARecClass":     "T_CtasARecClass.xlsx",
         "T_CCCats":            "T_CCCats.xlsx",
         "T_KonCats":           "T_KonCats.xlsx",
+        "T_SaldosCC":           "T_SaldosCC.xlsx",
     }
     missing_static = []
     for key, fname in static_files.items():
@@ -2279,6 +2460,8 @@ def main(year: int, month: int):
     #all_data = debug_df(all_data, "Kon_RelGeral", "ECO")
     all_data = split_SKU_lines_by_cost_ratio(all_data)
     #all_data = debug_df(all_data, "Kon_RelGeral", "FOX")
+    all_data = Kon_MatchTransfers(all_data)
+    all_data = Kon_FixSums(all_data)
 
     # --- Build Kon summary ---
     #all_data = build_Kon_Report1(all_data)
