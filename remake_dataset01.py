@@ -2178,8 +2178,8 @@ def Kon_FixSums(all_data):
             "CATEGORIA_LANCAMENTO": "AJUSTE",
             "ANOMES": current_anomes,
             "HASSKU": False,
-            "KON_GR": "AJUSTE",
-            "KON_SGR": "AJUSTE DE SALDO",
+            "KON_GR": "AJUSTE CC",
+            "KON_SGR": "Ajuste de Saldo",
         })
 
     # -------------------------------------------------------------
@@ -2246,7 +2246,7 @@ def Kon_MatchTransfers(all_data):
             "CATEGORIA_LANCAMENTO": "Diff de Saques",
             "ANOMES": current_anomes,
             "HASSKU": False,
-            "KON_GR": "SAQUE",
+            "KON_GR": "AJUSTE SAQUE",
             "KON_SGR": "Ajuste de Saque por CC",
         })
 
