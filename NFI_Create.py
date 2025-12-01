@@ -9,8 +9,19 @@ YEAR = "2025"
 MONTH = "10-Outubro"
 
 # Define base folder and available series
-#BASE_FOLDER = "/Users/mauricioalouan/Dropbox/nfs"
-BASE_FOLDER = "/Users/simon/Library/CloudStorage/Dropbox/nfs"
+path_options = [
+    '/Users/mauricioalouan/Dropbox/nfs',
+    '/Users/simon/Library/CloudStorage/Dropbox/nfs'
+]
+BASE_FOLDER = None
+for path in path_options:
+    if os.path.exists(path):
+        BASE_FOLDER = path
+        break
+
+if not BASE_FOLDER:
+    print("⚠️ Warning: No valid BASE_FOLDER found.")
+    BASE_FOLDER = "/Users/mauricioalouan/Dropbox/nfs"
 SERIES_LIST = [
     "Serie 1 - Omie",
     "Serie 2 - filial",

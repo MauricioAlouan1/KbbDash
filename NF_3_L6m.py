@@ -6,7 +6,20 @@ from dateutil.relativedelta import relativedelta
 # === CONFIG ===
 YEAR = 2025
 MONTH = 10
-BASE_FOLDER = "/Users/simon/Library/CloudStorage/Dropbox/nfs"
+# Define base folder and available series
+path_options = [
+    '/Users/mauricioalouan/Dropbox/nfs',
+    '/Users/simon/Library/CloudStorage/Dropbox/nfs'
+]
+BASE_FOLDER = None
+for path in path_options:
+    if os.path.exists(path):
+        BASE_FOLDER = path
+        break
+
+if not BASE_FOLDER:
+    print("⚠️ Warning: No valid BASE_FOLDER found.")
+    BASE_FOLDER = "/Users/mauricioalouan/Dropbox/nfs"
 
 # === FUNCTION ===
 def combine_last_6_months(year: int, month: int):
