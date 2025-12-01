@@ -23,6 +23,9 @@ if not BASE_FOLDER:
 
 # === FUNCTION ===
 def combine_last_6_months(year: int, month: int):
+    # Define output directory
+    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade - Tsuriel")
+    
     all_data = []
     for i in range(6):
         target_date = datetime(year, month, 1) - relativedelta(months=i)
@@ -32,16 +35,19 @@ def combine_last_6_months(year: int, month: int):
         # find actual file
         pattern_prefix = f"Combined_NFs_{y_str}_{m_str}"
         found_file = None
-        for f in os.listdir(BASE_FOLDER):
-            if f.startswith(pattern_prefix) and f.endswith(".xlsx"):
-                found_file = f
-                break
-
+        
+        # Check if output_dir exists before listing
+        if os.path.exists(output_dir):
+            for f in os.listdir(output_dir):
+                if f.startswith(pattern_prefix) and f.endswith(".xlsx"):
+                    found_file = f
+                    break
+        
         if not found_file:
-            print(f"⚠️ Missing file for {y_str}-{m_str}: {pattern_prefix}*.xlsx")
+            print(f"⚠️ Missing file for {y_str}-{m_str}: {pattern_prefix}*.xlsx in {output_dir}")
             continue
 
-        file_path = os.path.join(BASE_FOLDER, found_file)
+        file_path = os.path.join(output_dir, found_file)
         try:
             df = pd.read_excel(file_path)
             df.insert(0, "RefMonth", f"{y_str}-{m_str}")
@@ -55,7 +61,7 @@ def combine_last_6_months(year: int, month: int):
         return
 
     combined_df = pd.concat(all_data, ignore_index=True)
-    out_file = os.path.join(BASE_FOLDER, f"Combined_NFs_L6M_{YEAR}_{MONTH:02d}.xlsx")
+    out_file = os.path.join(output_dir, f"Combined_NFs_L6M_{YEAR}_{MONTH:02d}.xlsx")
     combined_df.to_excel(out_file, index=False)
 
     print(f"\n✅ Combined 6-month Excel created: {out_file}")

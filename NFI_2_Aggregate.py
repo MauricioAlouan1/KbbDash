@@ -21,7 +21,7 @@ if not BASE_FOLDER:
     print("⚠️ Warning: No valid BASE_FOLDER found.")
     BASE_FOLDER = "/Users/mauricioalouan/Dropbox/nfs"
 
-# The same series used in Tabela_NFs.py
+# The same series used in NFI_1_Create.py
 SERIES_LIST = [
     "Serie 1 - Omie",
     "Serie 2 - filial",
@@ -35,14 +35,14 @@ SERIES_LIST = [
 ]
 
 # === MAIN FUNCTION ===
-def combine_monthly_excels(year, month):
+def combine_monthly_items_excels(year, month):
     # Define output directory
     output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade - Tsuriel")
     month_num = month.split('-')[0]
 
     all_data = []
     for series in SERIES_LIST:
-        filename = f"NF_{year}_{month_num}_{series}.xlsx"
+        filename = f"NFI_{year}_{month_num}_{series}.xlsx"
         file_path = os.path.join(output_dir, filename)
         
         if not os.path.exists(file_path):
@@ -62,12 +62,12 @@ def combine_monthly_excels(year, month):
         return
     
     combined_df = pd.concat(all_data, ignore_index=True)
-    combined_file = os.path.join(output_dir, f"Combined_NFs_{year}_{month_num}.xlsx")
+    combined_file = os.path.join(output_dir, f"Combined_Items_{year}_{month_num}.xlsx")
     
     combined_df.to_excel(combined_file, index=False)
-    print(f"✅ Combined Excel created: {combined_file}")
+    print(f"✅ Combined Items Excel created: {combined_file}")
     print(f"📊 Total rows combined: {len(combined_df)}")
 
 # === RUN ===
 if __name__ == "__main__":
-    combine_monthly_excels(YEAR, MONTH)
+    combine_monthly_items_excels(YEAR, MONTH)

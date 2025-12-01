@@ -44,8 +44,13 @@ def log_global(msg):
 def process_series(month, year, series):
     """Process XML invoices and cancellation events for a given month, year, and series."""
 
+    # Define output directory
+    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade - Tsuriel")
+    os.makedirs(output_dir, exist_ok=True)
+
+    month_num = month.split('-')[0]
     folder_path = os.path.join(BASE_FOLDER, year, series, month)
-    output_file = os.path.join(BASE_FOLDER, f"Extracted_Items_{year}_{month.replace('/', '-')}_{series}.xlsx")
+    output_file = os.path.join(output_dir, f"NFI_{year}_{month_num}_{series}.xlsx")
 
     if not os.path.exists(folder_path):
         log_global(f"Skipping {series}: Folder not found -> {folder_path}")
@@ -260,7 +265,11 @@ def process_all_series_for_month(year, month):
         process_series(month, year, series)
 
     # Save global log
-    log_path = os.path.join(BASE_FOLDER, f"Extracted_Items_Log_{year}_{month.replace('/', '-')}.txt")
+    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade - Tsuriel")
+    os.makedirs(output_dir, exist_ok=True)
+    month_num = month.split('-')[0]
+
+    log_path = os.path.join(output_dir, f"NFI_{year}_{month_num}_log.txt")
     with open(log_path, "w", encoding="utf-8") as f:
         for line in GLOBAL_LOG_LINES:
             f.write(line + "\n")
