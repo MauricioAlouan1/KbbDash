@@ -62,7 +62,7 @@ def combine_monthly_items_excels(year, month):
         return
     
     combined_df = pd.concat(all_data, ignore_index=True)
-    combined_file = os.path.join(output_dir, f"Combined_Items_{year}_{month_num}.xlsx")
+    combined_file = os.path.join(output_dir, f"NFI_{year}_{month_num}_todos.xlsx")
     
     combined_df.to_excel(combined_file, index=False)
     print(f"✅ Combined Items Excel created: {combined_file}")
