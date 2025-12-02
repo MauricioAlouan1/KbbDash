@@ -4,7 +4,7 @@ from openpyxl import load_workbook
 
 # === CONFIG ===
 YEAR = "2025"
-MONTH = "10-Outubro"
+MONTH = "11-Novembro"
 
 # Define base folder and available series
 path_options = [
