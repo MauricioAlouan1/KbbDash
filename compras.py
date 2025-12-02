@@ -4,7 +4,7 @@ from pathlib import Path
 
 # ⚙️ Configurações
 ANO = 2025
-MES = 10
+MES = 11
 COBERTURA_MINIMA = 30
 
 # 📂 Caminhos possíveis
