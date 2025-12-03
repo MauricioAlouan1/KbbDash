@@ -31,7 +31,10 @@ import re
 import numpy as np
 
 
-def _select_year_month():
+def _select_year_month(year=None, month=None):
+    if year and month:
+        return year, month
+
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("-y", "--year", type=int)
     parser.add_argument("-m", "--month", type=int)
@@ -55,11 +58,11 @@ def _select_year_month():
 
     return year, month
 
-# set the SAME globals your script already expects
-ano_x, mes_x = _select_year_month()
-ano_mes = f"{ano_x}_{mes_x:02d}"
-print(f"Selected period: {ano_mes}")
-# === end month selection ===
+# Global variables will be set in main()
+base_dir = None
+static_dir = None
+ano_mes = None
+
 
 def yymm(year, month): return f"{year}_{month:02d}"
 
@@ -2289,6 +2292,8 @@ def main(year: int, month: int):
     # remove all template sheets to start fresh
     for sh in wb_template.sheetnames[:]:
         del wb_template[sh]
+    # for sh in wb_template.sheetnames[:]: # Removed
+    #     del wb_template[sh] # Removed
     print(f"✅ Removed template sheets. Ready to write data...")
 
     # ----------------------------------------------------------------------
@@ -2343,7 +2348,7 @@ def main(year: int, month: int):
     # ----------------------------------------------------------------------
     # Load STATIC lookup tables (required for correct merges; fail-fast)
     # ----------------------------------------------------------------------
-    static_dir = os.path.join(base_dir, "Tables")
+    # static_dir = os.path.join(base_dir, "Tables") # This is now handled at the beginning of main
     static_files = {
         "T_CondPagto":         "T_CondPagto.xlsx",
         "T_Fretes":            "T_Fretes.xlsx",
@@ -2399,14 +2404,15 @@ def main(year: int, month: int):
             print("Changed N.º de venda_hyperlink to str. Sample values:", df_mlk['N.º DE VENDA_HYPERLINK'].head().tolist())
         all_data['MLK_Vendas'] = df_mlk
 
-    if 'L_LPI' in all_data and not all_data['L_LPI'].empty:
-        df_lpi = all_data['L_LPI']
-        # Note: Column renamed from 'CÓDIGO PEDIDO' to 'CodPed' in process_data.py
-        if 'CodPed' in df_lpi.columns:
-            df_lpi['CodPed'] = df_lpi['CodPed'].astype(str).str.strip()
-        elif 'CÓDIGO PEDIDO' in df_lpi.columns:
-            df_lpi['CÓDIGO PEDIDO'] = df_lpi['CÓDIGO PEDIDO'].astype(str).str.strip()
-        all_data['L_LPI'] = df_lpi
+    # Also fix L_LPI keys if needed
+    for k in ['L_LPI']:
+        if k in all_data and not all_data[k].empty:
+            df_any = all_data[k]
+            if 'CodPed' in df_any.columns:
+                all_data[k]['CodPed'] = all_data[k]['CodPed'].astype(str).str.strip()
+            elif 'CÓDIGO PEDIDO' in df_any.columns:
+                all_data[k]['CÓDIGO PEDIDO'] = all_data[k]['CÓDIGO PEDIDO'].astype(str).str.strip()
+    # --- end rollback block ---
 
     for k, df_any in list(all_data.items()):
         # Note: Support both old and new column names
@@ -2485,6 +2491,10 @@ def main(year: int, month: int):
         "MGK_Extrato", "MLA_Vendas" 
     }
 
+    # Prepare output file
+    output_file = os.path.join(base_dir, "clean", ano_mes, f"Kon_Report_{ano_mes}.xlsx")
+    wb_template = Workbook()
+    
     # --- Write each dataframe except excluded ones ---
     for key, df in all_data.items():
         if key in excluded_sheets:
@@ -2495,6 +2505,10 @@ def main(year: int, month: int):
         for row in dataframe_to_rows(df, index=False, header=True):
             ws.append(row)
         print(f"✅ Added {key} to workbook")
+
+    # Remove default sheet if empty
+    if "Sheet" in wb_template.sheetnames and len(wb_template.sheetnames) > 1:
+        del wb_template["Sheet"]
 
     wb_template.save(output_file)
     print(f"✅ All merged data saved to {output_file}")
@@ -2510,4 +2524,5 @@ def main(year: int, month: int):
 
 if __name__ == "__main__":
     # use the month picked at the top (ano_x/mes_x) — identical to Conc_Estoque behavior
-    main(ano_x, mes_x)
+    # main(ano_x, mes_x) # Original call
+    main() # New call

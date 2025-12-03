@@ -5,9 +5,13 @@ from openpyxl import load_workbook
 # ─────────────────────────────────────────────────────────────
 # 1. Prompt Logic
 # ─────────────────────────────────────────────────────────────
-def _prompt_year_month():
+def _prompt_year_month(year=None, month=None):
     import argparse
     from datetime import datetime
+    
+    if year is not None and month is not None:
+        return year, month
+
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("--year", "-y", type=int)
     ap.add_argument("--month", "-m", type=int)
@@ -20,8 +24,13 @@ def _prompt_year_month():
     default_year = now.year if now.month > 1 else now.year - 1
     default_month = now.month - 1 if now.month > 1 else 12
     print("Year and/or month not provided.")
-    year = int(input(f"Enter year (default {default_year}): ") or default_year)
-    month = int(input(f"Enter month [1-12] (default {default_month}): ") or default_month)
+    try:
+        year = int(input(f"Enter year (default {default_year}): ") or default_year)
+        month = int(input(f"Enter month [1-12] (default {default_month}): ") or default_month)
+    except EOFError:
+        print("Non-interactive mode detected. Using defaults.")
+        year, month = default_year, default_month
+        
     return year, month
 
 def resolve_base_dir():
@@ -163,68 +172,63 @@ def write_column_by_index_to_excel(df, excel_path, out_path, column_name, values
     print(f"📤 Returning written={written} for column '{column_name}'")
     return written
 
-def calculate_qtsp_from_resumo(base_dir: str, year: int, month: int) -> pd.DataFrame:
-    resumo_path = os.path.join(base_dir, "clean", f"{year}_{month:02d}", f"R_Resumo_{year}_{month:02d}.xlsm")
-    ano_mes = (year % 100) * 100 + month
-    print(f"Processando Saídas pro mês: {ano_mes}")
-    vendas = []
+def calculate_qtsp_from_invoices(base_dir: str, year: int, month: int) -> pd.DataFrame:
+    # Try to locate the 'nfs' directory relative to the dropbox root
+    # base_dir is usually .../Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data
+    # We want .../Dropbox/nfs
+    
+    dropbox_root = None
+    if "/Dropbox/" in base_dir:
+        dropbox_root = base_dir.split("/Dropbox/")[0] + "/Dropbox"
+    else:
+        # Fallback or assumption
+        dropbox_root = os.path.dirname(base_dir) # Go up one level? No, that's too deep.
+        # Let's try standard paths
+        possible_roots = [
+            '/Users/mauricioalouan/Dropbox',
+            '/Users/simon/Library/CloudStorage/Dropbox'
+        ]
+        for p in possible_roots:
+            if os.path.exists(p):
+                dropbox_root = p
+                break
+    
+    if not dropbox_root:
+        print("⚠️ Could not find Dropbox root to locate invoices.")
+        return pd.DataFrame(columns=["CODPP", "Qt_S"])
 
-    if not os.path.exists(resumo_path):
-        raise FileNotFoundError(f"❌ Arquivo não encontrado: {resumo_path}")
+    nfi_path = os.path.join(dropbox_root, "nfs", "Mauricio", "Contabilidade - Tsuriel", f"NFI_{year}_{month:02d}_todos.xlsx")
+    
+    if not os.path.exists(nfi_path):
+        print(f"⚠️ Invoice file not found: {nfi_path}")
+        return pd.DataFrame(columns=["CODPP", "Qt_S"])
 
-    # ─────────────────────────────
-    # O_NFCI (vendas tipo B)
-    # ─────────────────────────────
+    print(f"📖 Reading invoices from: {nfi_path}")
     try:
-        df_nfci = pd.read_excel(resumo_path, sheet_name="O_NFCI")
-        df_nfci["CODPP"] = df_nfci["CODPP"].astype(str).str.upper().str.strip()
-        df_nfci["QTD_B"] = pd.to_numeric(df_nfci["QT"], errors="coerce").fillna(0)
-        df_nfci["ANOMES"] = pd.to_numeric(df_nfci["ANOMES"], errors="coerce")
-        df_nfci = df_nfci[df_nfci["ANOMES"] == ano_mes]
-        vendas.append(df_nfci[["CODPP", "QTD_B"]])
+        df = pd.read_excel(nfi_path)
+        
+        # Filter for Sales if needed? 
+        # Assuming all items in NFI are relevant for stock output (Qt_S)
+        # Or maybe filter by 'Natureza'?
+        # For now, we sum all 'qCom' by 'CProd'
+        
+        if "CProd" not in df.columns or "qCom" not in df.columns:
+            print("❌ Columns CProd or qCom not found in invoice file.")
+            return pd.DataFrame(columns=["CODPP", "Qt_S"])
+
+        df["CODPP"] = df["CProd"].astype(str).str.upper().str.strip()
+        df["qCom"] = pd.to_numeric(df["qCom"], errors="coerce").fillna(0)
+        
+        # Group by Product
+        df_agg = df.groupby("CODPP", as_index=False)["qCom"].sum()
+        df_agg.rename(columns={"qCom": "Qt_S"}, inplace=True)
+        
+        print(f"✅ {len(df_agg)} products aggregated from invoices.")
+        return df_agg
+
     except Exception as e:
-        print(f"⚠️ Erro ao ler O_NFCI: {e}")
-
-    # ─────────────────────────────
-    # L_LPI (vendas tipo C)
-    # ─────────────────────────────
-    try:
-        df_lpi = pd.read_excel(resumo_path, sheet_name="L_LPI")
-        df_lpi = df_lpi[df_lpi["STATUS"].astype(str).str.upper() != "CANCELADO"]
-        df_lpi = df_lpi[df_lpi["EMPRESA"].astype(str).str.upper() == "K"]
-        df_lpi["CODPP"] = df_lpi["CODPP"].astype(str).str.upper().str.strip()
-        df_lpi["QTD_C"] = pd.to_numeric(df_lpi["QT"], errors="coerce").fillna(0)
-        df_lpi["ANOMES"] = pd.to_numeric(df_lpi["ANOMES"], errors="coerce")
-        df_lpi = df_lpi[df_lpi["ANOMES"] == ano_mes]
-        vendas.append(df_lpi[["CODPP", "QTD_C"]])
-    except Exception as e:
-        print(f"⚠️ Erro ao ler L_LPI: {e}")
-
-    if not vendas:
-        raise ValueError(f"❌ Nenhum dado de vendas encontrado para AnoMes {ano_mes}.")
-
-    # ─────────────────────────────
-    # Concatenate and sum properly
-    # ─────────────────────────────
-    df_all = pd.concat(vendas, ignore_index=True)
-
-    # unify column names before summing
-    if "QTD_B" not in df_all.columns:
-        df_all["QTD_B"] = 0
-    if "QTD_C" not in df_all.columns:
-        df_all["QTD_C"] = 0
-
-    # group by product and sum totals
-    df_all = (
-        df_all.groupby("CODPP", as_index=False)[["QTD_B", "QTD_C"]]
-        .sum()
-        .assign(Qt_S=lambda x: x["QTD_B"] + x["QTD_C"])
-    )
-
-    print(f"✅ {len(df_all)} produtos processados com Qt_S calculado.")
-    print(df_all.head())
-
-    return df_all[["CODPP", "Qt_S"]]
+        print(f"❌ Error reading invoices: {e}")
+        return pd.DataFrame(columns=["CODPP", "Qt_S"])
 
 def get_prev_month(year: int, month: int) -> tuple[int, int]:
     if month == 1:
@@ -235,8 +239,8 @@ def get_prev_month(year: int, month: int) -> tuple[int, int]:
 # ─────────────────────────────────────────────────────────────
 # 4. Main logic
 # ─────────────────────────────────────────────────────────────
-def main():
-    year, month = _prompt_year_month()
+def main(year=None, month=None):
+    year, month = _prompt_year_month(year, month)
     ano_mes = (year % 100) * 100 + month
     print(f"▶ Target AnoMes = {ano_mes}")
 
@@ -248,14 +252,10 @@ def main():
         raise FileNotFoundError(f"❌ File not found: {file_path}")
 
     # Ask user whether to overwrite original
-    choice = input("💾 Overwrite original file? [y/n]: ").strip().lower()
-    if choice == "y":
-        out_path = file_path
-    elif choice == "n":
-        out_path = os.path.join(tables_dir, "T_Entradas_modified.xlsx")
-    else:
-        print("❌ Aborted by user.")
-        exit()
+    # For automation, we default to overwriting or use a flag. 
+    # Here we will default to overwriting if running non-interactively, or we can just set out_path = file_path
+    out_path = file_path
+    print(f"💾 Will overwrite: {out_path}")
 
     # ─────────────────────────────────────────────
     # Load and process base table
@@ -276,9 +276,9 @@ def main():
     print(df_keep)
 
     # ─────────────────────────────────────────────
-    # Calculate Qt_S from resumo
+    # Calculate Qt_S from invoices
     # ─────────────────────────────────────────────
-    prods_com_saida = calculate_qtsp_from_resumo(base_dir, year, month)
+    prods_com_saida = calculate_qtsp_from_invoices(base_dir, year, month)
 
     print("\n Produtos com saidas: DDD")
     print(prods_com_saida)

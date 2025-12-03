@@ -258,16 +258,30 @@ def process_series(month, year, series):
 
     log_global(f"✅ Processed {series}: Extracted items saved to {output_file}")
 
+def get_month_folder_name(month_int):
+    months = {
+        1: "01-Janeiro", 2: "02-Fevereiro", 3: "03-Março", 4: "04-Abril",
+        5: "05-Maio", 6: "06-Junho", 7: "07-Julho", 8: "08-Agosto",
+        9: "09-Setembro", 10: "10-Outubro", 11: "11-Novembro", 12: "12-Dezembro"
+    }
+    return months.get(month_int, f"{month_int:02d}")
+
 # Call the function for all series for a given month
-def process_all_series_for_month(year, month):
+def main(year, month):
     """Iterate through all series and process XML files for a given month and year."""
+    # Convert to string format expected by folders
+    year_str = str(year)
+    month_str = get_month_folder_name(month)
+    
+    print(f"Processing for {year_str} / {month_str}")
+
     for series in SERIES_LIST:
-        process_series(month, year, series)
+        process_series(month_str, year_str, series)
 
     # Save global log
     output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade - Tsuriel")
     os.makedirs(output_dir, exist_ok=True)
-    month_num = month.split('-')[0]
+    month_num = month_str.split('-')[0]
 
     log_path = os.path.join(output_dir, f"NFI_{year}_{month_num}_log.txt")
     with open(log_path, "w", encoding="utf-8") as f:
@@ -277,4 +291,27 @@ def process_all_series_for_month(year, month):
     print(f"📝 Global log saved to {log_path}")
 
 if __name__ == "__main__":
-    process_all_series_for_month(YEAR, MONTH)
+    import argparse
+    from datetime import datetime
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--year", "-y", type=int)
+    parser.add_argument("--month", "-m", type=int)
+    args = parser.parse_args()
+    
+    if args.year and args.month:
+        main(args.year, args.month)
+    else:
+        # Default or interactive
+        now = datetime.now()
+        def_year = now.year
+        def_month = now.month - 1 if now.month > 1 else 12
+        if def_month == 12: def_year -= 1
+        
+        print(f"Using default/interactive mode. Default: {def_year}-{def_month}")
+        try:
+            y = int(input(f"Year [{def_year}]: ") or def_year)
+            m = int(input(f"Month [{def_month}]: ") or def_month)
+            main(y, m)
+        except:
+            main(def_year, def_month)

@@ -170,5 +170,41 @@ def combine_monthly_items_excels(year, month):
         print(f"❌ Error updating Resumo: {e}")
 
 # === RUN ===
+def get_month_folder_name(month_int):
+    months = {
+        1: "01-Janeiro", 2: "02-Fevereiro", 3: "03-Março", 4: "04-Abril",
+        5: "05-Maio", 6: "06-Junho", 7: "07-Julho", 8: "08-Agosto",
+        9: "09-Setembro", 10: "10-Outubro", 11: "11-Novembro", 12: "12-Dezembro"
+    }
+    return months.get(month_int, f"{month_int:02d}")
+
+def main(year, month):
+    year_str = str(year)
+    month_str = get_month_folder_name(month)
+    combine_monthly_items_excels(year_str, month_str)
+
 if __name__ == "__main__":
-    combine_monthly_items_excels(YEAR, MONTH)
+    import argparse
+    from datetime import datetime
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--year", "-y", type=int)
+    parser.add_argument("--month", "-m", type=int)
+    args = parser.parse_args()
+    
+    if args.year and args.month:
+        main(args.year, args.month)
+    else:
+        # Default or interactive
+        now = datetime.now()
+        def_year = now.year
+        def_month = now.month - 1 if now.month > 1 else 12
+        if def_month == 12: def_year -= 1
+        
+        print(f"Using default/interactive mode. Default: {def_year}-{def_month}")
+        try:
+            y = int(input(f"Year [{def_year}]: ") or def_year)
+            m = int(input(f"Month [{def_month}]: ") or def_month)
+            main(y, m)
+        except:
+            main(def_year, def_month)
