@@ -27,6 +27,7 @@ The pipeline executes the following scripts in order:
 | `step1_nf` | `NF_1_Create.py` | Processes NF (Nota Fiscal) XMLs. (Optional) |
 | `step2_nf_agg` | `NF_2_Aggregate.py` | Aggregates individual NF files. |
 | `step2_nfi_agg` | `NFI_2_Aggregate.py` | Aggregates individual NFI files. |
+| `step2_5_process_data` | `process_data.py` | Processes RAW files into CLEAN files. |
 | `step3_update_entradas` | `Atualiza_Entradas.py` | Updates the main `T_Entradas.xlsx` table with new invoice data. |
 | **MANUAL STEP** | N/A | **Pause**: User must open, save, and close `T_Entradas.xlsx` to recalculate formulas. |
 | `step4_inventory` | `process_inv.py` | Processes inventory data (`R_Estoq`). |
@@ -45,6 +46,11 @@ The pipeline uses a `check_dependencies` function to decide whether to run a ste
     - Level 1 Output files (from Step 1).
 - **Outputs**: `..._todos.xlsx` (Aggregated file).
 - **Logic**: Re-runs if new Level 1 files exist.
+
+### 2.5. Process Data (`step2_5_process_data`)
+- **Inputs**: RAW files in `.../Fechamentos/data/raw`.
+- **Outputs**: CLEAN files in `.../Fechamentos/data/clean`.
+- **Logic**: Always runs. The script itself handles file checking (skips if clean file is newer).
 
 ### 3. Update Entradas (`step3_update_entradas`)
 - **Inputs**: Aggregated files (`NF_..._todos.xlsx`, `NFI_..._todos.xlsx`).

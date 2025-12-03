@@ -11,6 +11,7 @@ SCRIPTS = {
     "step1_nf": "NF_1_Create", # Optional
     "step2_nf_agg": "NF_2_Aggregate",
     "step2_nfi_agg": "NFI_2_Aggregate",
+    "step2_5_process_data": "process_data",
     "step3_update_entradas": "Atualiza_Entradas",
     "step4_inventory": "process_inv",
     "step5_report": "remake_dataset01"
@@ -43,6 +44,14 @@ def run_step(step_name, module, year, month):
                 # Fallback for scripts that might not accept args yet or have different signature
                 print(f"⚠️ {step_name} main() might not accept args. Trying without...")
                 module.main()
+        elif step_name == "step2_5_process_data":
+            # Special case for process_data which has no main() but specific functions
+            if hasattr(module, 'check_and_process_files'):
+                module.check_and_process_files()
+            if hasattr(module, 'check_and_process_files_csv'):
+                module.check_and_process_files_csv()
+            if hasattr(module, 'check_and_process_files_multiformat'):
+                module.check_and_process_files_multiformat()
         else:
             print(f"❌ {step_name} has no main() function.")
             return False
@@ -168,6 +177,11 @@ def check_dependencies(step_name, year, month, base_dir, force=False):
         print(f"⏭️ {step_name}: Up to date. Skipping.")
         return False
 
+    elif step_name == "step2_5_process_data":
+        # Always run process_data as requested
+        print(f"🔄 {step_name}: Running process_data (always runs).")
+        return True
+
     elif step_name == "step3_update_entradas":
         # Input: Level 2 outputs (todos.xlsx)
         # Output: T_Entradas.xlsx (modified)
@@ -280,6 +294,7 @@ def main():
         "step1_nf",
         "step2_nf_agg",
         "step2_nfi_agg",
+        "step2_5_process_data",
         "step3_update_entradas",
         "step4_inventory",
         "step5_report"
