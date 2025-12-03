@@ -38,7 +38,7 @@ SERIES_LIST = [
 def combine_monthly_items_excels(year, month):
     # Define output directory
     output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade - Tsuriel")
-    month_num = month.split('-')[0]
+    month_num = str(month).split('-')[0].zfill(2)
 
     # Define path for lookup tables and Resumo
     # Assuming BASE_FOLDER ends with /nfs, we strip it to get the root Dropbox folder
@@ -59,40 +59,38 @@ def combine_monthly_items_excels(year, month):
             print(f"⚠️ Warning: Columns 'Natureza_NF' or 'Natureza_Grp' not found in {lookup_file}")
             lookup_map = {}
     except Exception as e:
-        print(f"❌ Error reading lookup table {lookup_file}: {e}")
+        print(f"⚠️ Error reading lookup table: {e}")
         lookup_map = {}
 
-    all_data = []
+    combined_df = pd.DataFrame()
+
+    # Iterate through series
     for series in SERIES_LIST:
-        filename = f"NFI_{year}_{month_num}_{series}.xlsx"
-        file_path = os.path.join(output_dir, filename)
+        # Input file from NFI_1_Create
+        input_file = os.path.join(output_dir, f"NFI_{year}_{month_num}_{series}.xlsx")
         
-        if not os.path.exists(file_path):
-            print(f"⚠️ Skipping missing file: {file_path}")
+        if not os.path.exists(input_file):
+            print(f"Skipping {series}: File not found -> {input_file}")
             continue
-        
+            
         try:
-            df = pd.read_excel(file_path)
+            df = pd.read_excel(input_file)
             df.insert(0, "Series", series)  # add series name
-            
-            # Add Natureza_GRP column
-            # Use map and fillna with 999
+            # Add Natureza_GRP
             df["Natureza_GRP"] = df["Natureza"].map(lookup_map).fillna(999)
-            
-            all_data.append(df)
-            print(f"📂 Added: {series} ({len(df)} rows)")
+            combined_df = pd.concat([combined_df, df], ignore_index=True)
+            print(f"✔ Loaded {series} ({len(df)} rows)")
         except Exception as e:
-            print(f"❌ Error reading {series}: {e}")
-    
-    if not all_data:
-        print("No data files found — nothing to combine.")
+            print(f"❌ Error reading {input_file}: {e}")
+
+    if combined_df.empty:
+        print("No data combined.")
         return
-    
-    combined_df = pd.concat(all_data, ignore_index=True)
-    combined_file = os.path.join(output_dir, f"NFI_{year}_{month_num}_todos.xlsx")
-    
-    combined_df.to_excel(combined_file, index=False)
-    print(f"✅ Combined Items Excel created: {combined_file}")
+
+    # Save combined file
+    combined_output = os.path.join(output_dir, f"NFI_{year}_{month_num}_todos.xlsx")
+    combined_df.to_excel(combined_output, index=False)
+    print(f"✅ Combined file saved: {combined_output}")
     print(f"📊 Total rows combined: {len(combined_df)}")
 
     # === UPDATE RESUMO ===
@@ -129,11 +127,11 @@ def combine_monthly_items_excels(year, month):
         totals[f"MA_NFI_{name}_Vdesc"] = group["vDesc_Item"].sum()
         totals[f"MA_NFI_{name}_vNF"] = group["vNF_Item"].sum()
 
-    if not os.path.exists(resumo_file):
-        print(f"❌ Resumo file not found: {resumo_file}")
-        return
-
     try:
+        if not os.path.exists(resumo_file):
+            print(f"⚠️ Resumo file not found: {resumo_file}")
+            return
+
         wb = load_workbook(resumo_file)
         if "Numbers" not in wb.sheetnames:
              print(f"❌ Sheet 'Numbers' not found in {resumo_file}")
@@ -170,17 +168,9 @@ def combine_monthly_items_excels(year, month):
         print(f"❌ Error updating Resumo: {e}")
 
 # === RUN ===
-def get_month_folder_name(month_int):
-    months = {
-        1: "01-Janeiro", 2: "02-Fevereiro", 3: "03-Março", 4: "04-Abril",
-        5: "05-Maio", 6: "06-Junho", 7: "07-Julho", 8: "08-Agosto",
-        9: "09-Setembro", 10: "10-Outubro", 11: "11-Novembro", 12: "12-Dezembro"
-    }
-    return months.get(month_int, f"{month_int:02d}")
-
 def main(year, month):
     year_str = str(year)
-    month_str = get_month_folder_name(month)
+    month_str = f"{month:02d}"
     combine_monthly_items_excels(year_str, month_str)
 
 if __name__ == "__main__":

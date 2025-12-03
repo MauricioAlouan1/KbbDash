@@ -38,7 +38,7 @@ SERIES_LIST = [
 def combine_monthly_excels(year, month):
     # Define output directory
     output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade - Tsuriel")
-    month_num = month.split('-')[0]
+    month_num = str(month).split('-')[0].zfill(2)
 
     # Define path for lookup tables and Resumo
     # Assuming BASE_FOLDER ends with /nfs, we strip it to get the root Dropbox folder
@@ -167,17 +167,10 @@ def combine_monthly_excels(year, month):
         print(f"❌ Error updating Resumo: {e}")
 
 # === RUN ===
-def get_month_folder_name(month_int):
-    months = {
-        1: "01-Janeiro", 2: "02-Fevereiro", 3: "03-Março", 4: "04-Abril",
-        5: "05-Maio", 6: "06-Junho", 7: "07-Julho", 8: "08-Agosto",
-        9: "09-Setembro", 10: "10-Outubro", 11: "11-Novembro", 12: "12-Dezembro"
-    }
-    return months.get(month_int, f"{month_int:02d}")
-
 def main(year, month):
     year_str = str(year)
-    month_str = get_month_folder_name(month)
+    # Just pass the month number as string, e.g. "11"
+    month_str = f"{month:02d}"
     combine_monthly_excels(year_str, month_str)
 
 if __name__ == "__main__":
