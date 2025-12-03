@@ -152,10 +152,7 @@ def check_dependencies(step_name, year, month, base_dir, force=False):
         prefix = "NFI" if "nfi" in step_name else "NF"
         latest_input_l1 = get_latest_mtime_in_folder(nfs_output_dir, f"{prefix}_{year}_{month}")
         
-        # T_NFTipo
-        t_nftipo_mtime = get_file_mtime(os.path.join(tables_dir, "T_NFTipo.xlsx"))
-        
-        max_input = max(latest_input_l1, t_nftipo_mtime)
+        max_input = latest_input_l1
         
         # Output
         output_file = os.path.join(nfs_output_dir, f"{prefix}_{year}_{month:02d}_todos.xlsx")
