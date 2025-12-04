@@ -47,28 +47,28 @@ _defaults = _default_filters_from_df(df_init)
 # Define the filter components
 # Replace your DatePickerRange & dropdowns with:
 
-dcc.DatePickerRange(
+date_picker = dcc.DatePickerRange(
     id="date-picker",
     start_date=_defaults["start"].date(),
     end_date=_defaults["end"].date(),
     display_format="YYYY-MM-DD",
-),
+)
 
-dcc.Dropdown(
+company_filter = dcc.Dropdown(
     id="company-filter",
     options=_defaults["emp_options"],
     value=None,              # None = no filter
     multi=True,
     placeholder="Select Company",
-),
+)
 
-dcc.Dropdown(
+marketplace_filter = dcc.Dropdown(
     id="marketplace-filter",
     options=_defaults["mp_options"],
     value=None,              # None = no filter
     multi=True,
     placeholder="Select Marketplace",
-),
+)
 
 # Define the main layout with tabs
 app.layout = html.Div([

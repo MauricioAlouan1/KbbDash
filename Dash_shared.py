@@ -16,6 +16,7 @@ _LOADED_FILE: Optional[Path] = None
 def _candidate_data_roots() -> list[Path]:
     return [
         Path("/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data"),
+        Path("/Users/simon/Library/CloudStorage/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data"),
         Path(__file__).resolve().parents[1] / "data",   # repo_root/data
         Path.cwd() / "data",
     ]
@@ -31,7 +32,7 @@ def _month_dirs(base: Path) -> list[Path]:
     # sort newest first
     return sorted(dirs, key=lambda p: p.name, reverse=True)
 
-def _find_conc_file(tag: str | None = None) -> Path | None:
+def _find_conc_file(tag: Optional[str] = None) -> Optional[Path]:
     """
     tag format: 'YYYY_MM' (e.g., '2025_08'). If None, pick latest.
     """
