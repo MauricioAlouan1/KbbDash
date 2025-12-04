@@ -2,7 +2,7 @@ import os
 import sys
 import argparse
 import importlib.util
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 
 # Define paths and script names
@@ -11,6 +11,7 @@ SCRIPTS = {
     "step1_nf": "NF_1_Create", # Optional
     "step2_nf_agg": "NF_2_Aggregate",
     "step2_nfi_agg": "NFI_2_Aggregate",
+    "step2_5_process_data": "process_data",
     "step3_update_entradas": "Atualiza_Entradas",
     "step4_inventory": "process_inv",
     "step5_report": "remake_dataset01"
@@ -43,6 +44,14 @@ def run_step(step_name, module, year, month):
                 # Fallback for scripts that might not accept args yet or have different signature
                 print(f"⚠️ {step_name} main() might not accept args. Trying without...")
                 module.main()
+        elif step_name == "step2_5_process_data":
+            # Special case for process_data which has no main() but specific functions
+            if hasattr(module, 'check_and_process_files'):
+                module.check_and_process_files()
+            if hasattr(module, 'check_and_process_files_csv'):
+                module.check_and_process_files_csv()
+            if hasattr(module, 'check_and_process_files_multiformat'):
+                module.check_and_process_files_multiformat()
         else:
             print(f"❌ {step_name} has no main() function.")
             return False
@@ -152,10 +161,7 @@ def check_dependencies(step_name, year, month, base_dir, force=False):
         prefix = "NFI" if "nfi" in step_name else "NF"
         latest_input_l1 = get_latest_mtime_in_folder(nfs_output_dir, f"{prefix}_{year}_{month}")
         
-        # T_NFTipo
-        t_nftipo_mtime = get_file_mtime(os.path.join(tables_dir, "T_NFTipo.xlsx"))
-        
-        max_input = max(latest_input_l1, t_nftipo_mtime)
+        max_input = latest_input_l1
         
         # Output
         output_file = os.path.join(nfs_output_dir, f"{prefix}_{year}_{month:02d}_todos.xlsx")
@@ -170,6 +176,11 @@ def check_dependencies(step_name, year, month, base_dir, force=False):
             
         print(f"⏭️ {step_name}: Up to date. Skipping.")
         return False
+
+    elif step_name == "step2_5_process_data":
+        # Always run process_data as requested
+        print(f"🔄 {step_name}: Running process_data (always runs).")
+        return True
 
     elif step_name == "step3_update_entradas":
         # Input: Level 2 outputs (todos.xlsx)
@@ -252,14 +263,39 @@ def check_dependencies(step_name, year, month, base_dir, force=False):
 
 def main():
     parser = argparse.ArgumentParser(description="Master Pipeline for KBB MF Data Processing")
-    parser.add_argument("--year", "-y", type=int, required=True, help="Year (YYYY)")
-    parser.add_argument("--month", "-m", type=int, required=True, help="Month (MM)")
+    parser.add_argument("--year", "-y", type=int, required=False, help="Year (YYYY)")
+    parser.add_argument("--month", "-m", type=int, required=False, help="Month (MM)")
     parser.add_argument("--step", "-s", type=str, help="Run specific step only")
     parser.add_argument("--start-from", type=str, help="Start from specific step")
     parser.add_argument("--force", "-f", action="store_true", help="Force run all steps (ignore dependencies)")
     
     args = parser.parse_args()
-    year, month = args.year, args.month
+
+    # Calculate default (previous month)
+    today = datetime.now()
+    first_of_this_month = today.replace(day=1)
+    last_month_date = first_of_this_month - timedelta(days=1)
+    default_year = last_month_date.year
+    default_month = last_month_date.month
+
+    year = args.year
+    month = args.month
+
+    if year is None:
+        try:
+            input_year = input(f"Year [{default_year}]: ")
+            year = int(input_year) if input_year.strip() else default_year
+        except ValueError:
+            print("❌ Invalid year.")
+            return
+
+    if month is None:
+        try:
+            input_month = input(f"Month [{default_month:02d}]: ")
+            month = int(input_month) if input_month.strip() else default_month
+        except ValueError:
+            print("❌ Invalid month.")
+            return
     
     # Resolve Base Dir (needed for dependency checks)
     path_options = [
@@ -283,6 +319,7 @@ def main():
         "step1_nf",
         "step2_nf_agg",
         "step2_nfi_agg",
+        "step2_5_process_data",
         "step3_update_entradas",
         "step4_inventory",
         "step5_report"
