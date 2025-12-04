@@ -2,7 +2,7 @@ import os
 import sys
 import argparse
 import importlib.util
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 
 # Define paths and script names
@@ -263,14 +263,39 @@ def check_dependencies(step_name, year, month, base_dir, force=False):
 
 def main():
     parser = argparse.ArgumentParser(description="Master Pipeline for KBB MF Data Processing")
-    parser.add_argument("--year", "-y", type=int, required=True, help="Year (YYYY)")
-    parser.add_argument("--month", "-m", type=int, required=True, help="Month (MM)")
+    parser.add_argument("--year", "-y", type=int, required=False, help="Year (YYYY)")
+    parser.add_argument("--month", "-m", type=int, required=False, help="Month (MM)")
     parser.add_argument("--step", "-s", type=str, help="Run specific step only")
     parser.add_argument("--start-from", type=str, help="Start from specific step")
     parser.add_argument("--force", "-f", action="store_true", help="Force run all steps (ignore dependencies)")
     
     args = parser.parse_args()
-    year, month = args.year, args.month
+
+    # Calculate default (previous month)
+    today = datetime.now()
+    first_of_this_month = today.replace(day=1)
+    last_month_date = first_of_this_month - timedelta(days=1)
+    default_year = last_month_date.year
+    default_month = last_month_date.month
+
+    year = args.year
+    month = args.month
+
+    if year is None:
+        try:
+            input_year = input(f"Year [{default_year}]: ")
+            year = int(input_year) if input_year.strip() else default_year
+        except ValueError:
+            print("❌ Invalid year.")
+            return
+
+    if month is None:
+        try:
+            input_month = input(f"Month [{default_month:02d}]: ")
+            month = int(input_month) if input_month.strip() else default_month
+        except ValueError:
+            print("❌ Invalid month.")
+            return
     
     # Resolve Base Dir (needed for dependency checks)
     path_options = [
