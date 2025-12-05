@@ -380,6 +380,12 @@ def main(year, month):
     final_df['UltEntr'] = final_df['AnoMes']
     final_df = final_df.drop(["Pai"], axis=1)
     final_df['AnoMes'] = (year % 100) * 100 + month
+    
+    # Round all numeric columns to 2 decimal places
+    import numpy as np
+    numeric_cols = final_df.select_dtypes(include=[np.number]).columns
+    final_df[numeric_cols] = final_df[numeric_cols].round(2)
+
     # Step 3: Save the resulting dataframe to a new Excel file
     output_filepath = os.path.join(base_dir, 'clean',f'{year}_{month:02d}', f'R_Estoq_fdm_{year}_{month:02d}.xlsx')
     final_df.to_excel(output_filepath, index=False, sheet_name='Data')

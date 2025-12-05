@@ -44,7 +44,7 @@ if not base_path:
 
 
 # 📄 Arquivos
-arquivo_resumo = base_path / f"R_Resumo_{ANO}_{MES:02}.xlsx"
+arquivo_resumo = base_path / f"R_Resumo_{ANO}_{MES:02}.xlsm"
 arquivo_estoque = base_path / f"R_Estoq_fdm_{ANO}_{MES:02}.xlsx"
 
 # 📊 Leitura dos dados

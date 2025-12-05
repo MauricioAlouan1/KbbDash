@@ -75,15 +75,22 @@ TABLES_DIR = os.path.join(base_dir, TABLES_SUBDIR)
 # -----------------------
 # Helpers
 # -----------------------
-def find_existing_excel(base_path: Path, base_name: str) -> Path:
+def find_existing_excel(base_dir: Path, prefix: str) -> Path:
     """
-    Tenta encontrar arquivo com base em base_name + .xlsx ou .xlsm
+    Tries to find {prefix}.xlsm first, then {prefix}.xlsx.
+    Returns the Path object if found, else raises FileNotFoundError.
     """
-    for ext in [".xlsx", ".xlsm"]:
-        candidate = base_path / f"{base_name}{ext}"
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError(f"Arquivo não encontrado: {base_path}/{base_name}.xlsx ou .xlsm")
+    # 1. Try exact match with .xlsm
+    p_xlsm = base_dir / f"{prefix}.xlsm"
+    if p_xlsm.exists():
+        return p_xlsm
+
+    # 2. Try exact match with .xlsx
+    p_xlsx = base_dir / f"{prefix}.xlsx"
+    if p_xlsx.exists():
+        return p_xlsx
+    
+    raise FileNotFoundError(f"Could not find {prefix}.xlsm or {prefix}.xlsx in {base_dir}")
 
 def ym_to_prev(year: int, month: int) -> Tuple[int, int]:
     if month == 1:
@@ -721,6 +728,20 @@ def main(year: int, month: int, save_excel: bool = True) -> Path:
     # Filtra colunas existentes (caso alguma falte)
     parent_report = parent_report[[col for col in final_cols_order if col in parent_report.columns]]
     parent_report = adjust_missing_inventory_budget(parent_report)
+
+    # Round all numeric columns to 2 decimal places
+    # Round all numeric columns to 2 decimal places
+    # Force a copy to ensure we are working on a fresh DataFrame
+    parent_report = parent_report.copy()
+    
+    # Debug: Print dtypes
+    print("DEBUG: Dtypes before rounding:")
+    print(parent_report.dtypes)
+    
+    cols_to_round = parent_report.select_dtypes(include=[np.number]).columns
+    print(f"DEBUG: Columns selected for rounding: {cols_to_round.tolist()}")
+    
+    parent_report[cols_to_round] = parent_report[cols_to_round].round(2)
 
     # Save CSV and XLSX
     tag = yymm_to_str(year, month)

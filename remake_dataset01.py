@@ -2491,8 +2491,8 @@ def main(year: int, month: int):
         "MGK_Extrato", "MLA_Vendas" 
     }
 
-    # Prepare output file
-    output_file = os.path.join(base_dir, "clean", ano_mes, f"R_Resumo_{ano_mes}.xlsx")
+    # Prepare    # Output file
+    output_file = os.path.join(base_dir, "clean", ano_mes, f"R_Resumo_{ano_mes}.xlsm")
     wb_template = Workbook()
     
     # --- Write each dataframe except excluded ones ---
@@ -2523,6 +2523,23 @@ def main(year: int, month: int):
 
 
 if __name__ == "__main__":
-    # use the month picked at the top (ano_x/mes_x) — identical to Conc_Estoque behavior
-    # main(ano_x, mes_x) # Original call
-    main() # New call
+    # If missing, ask interactively
+    import datetime
+    now = datetime.datetime.now()
+    
+    # Try to get from args if implemented, otherwise interactive
+    # Since we don't have argparse here yet, let's just do interactive
+    print("Year and/or month not provided.")
+    try:
+        year_input = input(f"Enter year (default {now.year}): ")
+        year = int(year_input) if year_input else now.year
+        
+        default_month = now.month - 1 if now.month > 1 else 12
+        month_input = input(f"Enter month [1-12] (default {default_month}): ")
+        month = int(month_input) if month_input else default_month
+        
+        main(year, month)
+    except ValueError:
+        print("Invalid input. Please enter numbers.")
+    except KeyboardInterrupt:
+        print("\nOperation cancelled.")
