@@ -5,8 +5,10 @@ import re
 from openpyxl import load_workbook
 
 # Run processing for all series for a specific month
-YEAR = "2025"
-MONTH = "11-Novembro"
+YEAR = 0
+MONTH = 0
+YEAR_str = ""
+MONTH_str = ""
 
 # Define base folder and available series
 path_options = [
@@ -41,7 +43,7 @@ def log_global(msg):
     GLOBAL_LOG_LINES.append(msg)
 
 
-def process_series(month, year, series):
+def process_series(series):
     """Process XML invoices and cancellation events for a given month, year, and series."""
 
     import os
@@ -51,15 +53,16 @@ def process_series(month, year, series):
     from openpyxl import load_workbook
 
     # Define output directory
-    month_num_for_dir = str(month).split('-')[0].zfill(2)
-    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade", f"{year}_{month_num_for_dir}")
+    # Define output directory
+    month_num_for_dir = f"{MONTH:02d}"
+    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade", f"{YEAR}_{month_num_for_dir}")
     
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
 
-    month_num = month.split('-')[0]
-    folder_path = os.path.join(BASE_FOLDER, year, series, month)
-    output_file = os.path.join(output_dir, f"NF_{year}_{month_num}_{series}.xlsx")
+    month_num = f"{MONTH:02d}"
+    folder_path = os.path.join(BASE_FOLDER, YEAR_str, series, MONTH_str)
+    output_file = os.path.join(output_dir, f"NF_{YEAR}_{month_num}_{series}.xlsx")
 
     if not os.path.exists(folder_path):
         log_global(f"Skipping {series}: Folder not found -> {folder_path}")
@@ -209,7 +212,7 @@ def process_series(month, year, series):
     ])
 
     if df.empty:
-        log_global(f"No valid data found for {series} - {month}/{year}. Skipping file creation.")
+        log_global(f"No valid data found for {series} - {MONTH_str}/{YEAR_str}. Skipping file creation.")
         return
 
     df.to_excel(output_file, index=False)
@@ -230,30 +233,27 @@ def process_series(month, year, series):
 
 def get_month_folder_name(month_int):
     months = {
-        1: "01-Janeiro", 2: "02-Fevereiro", 3: "03-Março", 4: "04-Abril",
-        5: "05-Maio", 6: "06-Junho", 7: "07-Julho", 8: "08-Agosto",
-        9: "09-Setembro", 10: "10-Outubro", 11: "11-Novembro", 12: "12-Dezembro"
+        1: "1-Janeiro", 2: "2-Fevereiro", 3: "3-Março", 4: "4-Abril",
+        5: "5-Maio", 6: "6-Junho", 7: "7-Julho", 8: "8-Agosto",
+        9: "9-Setembro", 10: "10-Outubro", 11: "11-Novembro", 12: "12-Dezembro"
     }
     return months.get(month_int, f"{month_int:02d}")
 
 # Call the function for all series for a given month
-def main(year, month):
+def main():
     """Iterate through all series and process XML files for a given month and year."""
-    # Convert to string format expected by folders
-    year_str = str(year)
-    month_str = get_month_folder_name(month)
     
-    print(f"Processing for {year_str} / {month_str}")
+    print(f"Processing for {YEAR_str} / {MONTH_str}")
 
     for series in SERIES_LIST:
-        process_series(month_str, year_str, series)
+        process_series(series)
 
     # Save global log
-    month_num = month_str.split('-')[0]
-    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade", f"{year}_{month_num}")
+    month_num = f"{MONTH:02d}"
+    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade", f"{YEAR}_{month_num}")
     os.makedirs(output_dir, exist_ok=True)
     
-    log_path = os.path.join(output_dir, f"NF_{year}_{month_num}_log.txt")
+    log_path = os.path.join(output_dir, f"NF_{YEAR}_{month_num}_log.txt")
     with open(log_path, "w", encoding="utf-8") as f:
         for line in GLOBAL_LOG_LINES:
             f.write(line + "\n")
@@ -270,7 +270,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if args.year and args.month:
-        main(args.year, args.month)
+        YEAR = args.year
+        MONTH = args.month
     else:
         # Default or interactive
         now = datetime.now()
@@ -280,8 +281,15 @@ if __name__ == "__main__":
         
         print(f"Using default/interactive mode. Default: {def_year}-{def_month}")
         try:
-            y = int(input(f"Year [{def_year}]: ") or def_year)
-            m = int(input(f"Month [{def_month}]: ") or def_month)
-            main(y, m)
+            YEAR = int(input(f"Year [{def_year}]: ") or def_year)
+            MONTH = int(input(f"Month [{def_month}]: ") or def_month)
         except:
-            main(def_year, def_month)
+            YEAR = def_year
+            MONTH = def_month
+
+    # Set global string variables once
+    YEAR_str = str(YEAR)
+    MONTH_str = get_month_folder_name(MONTH)
+
+    main()
+
