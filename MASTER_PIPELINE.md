@@ -38,14 +38,14 @@ The pipeline uses a `check_dependencies` function to decide whether to run a ste
 
 ### 1. Invoice Creation (`step1_nfi`, `step1_nf`)
 - **Inputs**: XML files in `.../nfs/{year}/Serie X/{month_name}`.
-- **Outputs**: Excel files in `.../Mauricio/Contabilidade - Tsuriel`.
-- **Logic**: Re-runs if **any** XML file in the source folder is newer than the latest output file for that month.
+- **Outputs**: Excel files in `.../Mauricio/Contabilidade/{year}_{month}`.
+- **Logic**: Re-runs if **any** XML file in the source folder is newer than the **oldest** output file for that month.
 
 ### 2. Aggregation (`step2_nf_agg`, `step2_nfi_agg`)
 - **Inputs**: 
-    - Level 1 Output files (from Step 1).
-- **Outputs**: `..._todos.xlsx` (Aggregated file).
-- **Logic**: Re-runs if new Level 1 files exist.
+    - Level 1 Output files (from Step 1) in `.../Mauricio/Contabilidade/{year}_{month}`.
+- **Outputs**: `..._todos.xlsm` (Aggregated file) in `.../Mauricio/Contabilidade/{year}_{month}`.
+- **Logic**: Re-runs if any Level 1 file is newer than the aggregated file.
 
 ### 2.5. Process Data (`step2_5_process_data`)
 - **Inputs**: RAW files in `.../Fechamentos/data/raw`.

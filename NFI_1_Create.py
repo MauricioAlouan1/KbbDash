@@ -45,8 +45,11 @@ def process_series(month, year, series):
     """Process XML invoices and cancellation events for a given month, year, and series."""
 
     # Define output directory
-    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade - Tsuriel")
-    os.makedirs(output_dir, exist_ok=True)
+    month_num = str(month).split('-')[0].zfill(2)
+    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade", f"{year}_{month_num}")
+    
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
 
     month_num = month.split('-')[0]
     folder_path = os.path.join(BASE_FOLDER, year, series, month)
@@ -279,9 +282,9 @@ def main(year, month):
         process_series(month_str, year_str, series)
 
     # Save global log
-    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade - Tsuriel")
-    os.makedirs(output_dir, exist_ok=True)
     month_num = month_str.split('-')[0]
+    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade", f"{year}_{month_num}")
+    os.makedirs(output_dir, exist_ok=True)
 
     log_path = os.path.join(output_dir, f"NFI_{year}_{month_num}_log.txt")
     with open(log_path, "w", encoding="utf-8") as f:

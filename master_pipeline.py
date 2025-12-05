@@ -64,26 +64,59 @@ def run_step(step_name, module, year, month):
         return False
 
 def get_latest_mtime_in_folder(folder_path, pattern=None):
-    """Get the latest modification time of files in a folder matching a pattern."""
+    """
+    Get the latest modification time of files in a folder matching a pattern.
+    Returns 0 if no files found.
+    """
     if not os.path.exists(folder_path):
         return 0
     
     latest_mtime = 0
-    for root, _, files in os.walk(folder_path):
+    for root, dirs, files in os.walk(folder_path):
         for f in files:
             if pattern and pattern not in f:
                 continue
-            # Ignore hidden files
-            if f.startswith('.'):
+            # Special check for temp files
+            if f.startswith("~$"):
                 continue
+                
             full_path = os.path.join(root, f)
             try:
                 mtime = os.path.getmtime(full_path)
                 if mtime > latest_mtime:
                     latest_mtime = mtime
-            except OSError:
+            except:
                 pass
     return latest_mtime
+
+def get_oldest_mtime_in_folder(folder_path, pattern=None):
+    """
+    Get the oldest modification time of files in a folder matching a pattern.
+    Returns 0 if no files found.
+    """
+    if not os.path.exists(folder_path):
+        return 0
+    
+    oldest_mtime = float('inf')
+    found_any = False
+    
+    for root, dirs, files in os.walk(folder_path):
+        for f in files:
+            if pattern and pattern not in f:
+                continue
+            if f.startswith("~$"):
+                continue
+                
+            full_path = os.path.join(root, f)
+            try:
+                mtime = os.path.getmtime(full_path)
+                if mtime < oldest_mtime:
+                    oldest_mtime = mtime
+                    found_any = True
+            except:
+                pass
+                
+    return oldest_mtime if found_any else 0
 
 def get_file_mtime(file_path):
     if os.path.exists(file_path):
@@ -131,22 +164,25 @@ def check_dependencies(step_name, year, month, base_dir, force=False):
         # Or just return True for Level 1 if we can't easily map 1:1.
         # User said: "re-run if change in invoice files".
         
-        # Let's check global latest XML vs global latest Output
+        # Let's check global latest XML vs global OLDEST Output
         # This is a heuristic.
         latest_xml = get_latest_mtime_in_folder(os.path.join(nfs_dir, str(year)), ".xml")
         
-        # Check outputs in .../Mauricio/Contabilidade - Tsuriel
-        output_dir = os.path.join(nfs_dir, "Mauricio", "Contabilidade - Tsuriel")
+        # Check outputs in .../Mauricio/Contabilidade
+        output_dir = os.path.join(nfs_dir, "Mauricio", "Contabilidade", f"{year}_{month:02d}")
         prefix = "NFI" if "nfi" in step_name else "NF"
         # We need to check specific month files
         # Pattern: {prefix}_{year}_{month}_...
-        latest_output = get_latest_mtime_in_folder(output_dir, f"{prefix}_{year}_{month}")
+        # We want the OLDEST output file to compare against the NEWEST XML.
+        # If any output is older than the newest XML, we rerun.
+        oldest_output = get_oldest_mtime_in_folder(output_dir, f"{prefix}_{year}_{month}")
         
-        if latest_xml > latest_output:
-            print(f"🔄 {step_name}: New XMLs detected. Re-running.")
-            return True
-        if latest_output == 0:
+        if oldest_output == 0:
             print(f"🆕 {step_name}: Output missing. Running.")
+            return True
+
+        if latest_xml > oldest_output:
+            print(f"🔄 {step_name}: New XMLs detected (newer than oldest output). Re-running.")
             return True
             
         print(f"⏭️ {step_name}: Up to date. Skipping.")
@@ -157,14 +193,15 @@ def check_dependencies(step_name, year, month, base_dir, force=False):
         # Output: ..._todos.xlsx
         
         # Level 1 outputs
-        nfs_output_dir = os.path.join(nfs_dir, "Mauricio", "Contabilidade - Tsuriel")
+        # nfs_output_dir = os.path.join(nfs_dir, "Mauricio", "Contabilidade - Tsuriel")
+        nfs_output_dir = os.path.join(nfs_dir, "Mauricio", "Contabilidade", f"{year}_{month:02d}")
         prefix = "NFI" if "nfi" in step_name else "NF"
         latest_input_l1 = get_latest_mtime_in_folder(nfs_output_dir, f"{prefix}_{year}_{month}")
         
         max_input = latest_input_l1
         
         # Output
-        output_file = os.path.join(nfs_output_dir, f"{prefix}_{year}_{month:02d}_todos.xlsx")
+        output_file = os.path.join(nfs_output_dir, f"{prefix}_{year}_{month:02d}_todos.xlsm")
         output_mtime = get_file_mtime(output_file)
         
         if max_input > output_mtime:
@@ -186,10 +223,10 @@ def check_dependencies(step_name, year, month, base_dir, force=False):
         # Input: Level 2 outputs (todos.xlsx)
         # Output: T_Entradas.xlsx (modified)
         
-        nfs_output_dir = os.path.join(nfs_dir, "Mauricio", "Contabilidade - Tsuriel")
+        nfs_output_dir = os.path.join(nfs_dir, "Mauricio", "Contabilidade", f"{year}_{month:02d}")
         # Check both NF and NFI todos
-        nf_todos = get_file_mtime(os.path.join(nfs_output_dir, f"NF_{year}_{month:02d}_todos.xlsx"))
-        nfi_todos = get_file_mtime(os.path.join(nfs_output_dir, f"NFI_{year}_{month:02d}_todos.xlsx"))
+        nf_todos = get_file_mtime(os.path.join(nfs_output_dir, f"NF_{year}_{month:02d}_todos.xlsm"))
+        nfi_todos = get_file_mtime(os.path.join(nfs_output_dir, f"NFI_{year}_{month:02d}_todos.xlsm"))
         
         max_input = max(nf_todos, nfi_todos)
         

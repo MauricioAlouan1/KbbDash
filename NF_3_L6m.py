@@ -24,7 +24,15 @@ if not BASE_FOLDER:
 # === FUNCTION ===
 def combine_last_6_months(year: int, month: int):
     # Define output directory
-    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade - Tsuriel")
+    # output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade - Tsuriel")
+    # For L6M, where should it go? Probably the current month's folder?
+    # Or maybe just Contabilidade root?
+    # The user said "update in all places necessary".
+    # Let's put it in the requested month's folder.
+    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade", f"{year}_{month:02d}")
+    
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
     
     all_data = []
     for i in range(6):
@@ -32,22 +40,33 @@ def combine_last_6_months(year: int, month: int):
         y_str = target_date.strftime("%Y")
         m_str = target_date.strftime("%m")
 
+        # Define source directory for this specific month
+        source_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade", f"{y_str}_{m_str}")
+
         # find actual file
+        # Assuming we are looking for the 'todos' file from NF_2_Aggregate?
+        # The original code looked for "Combined_NFs_...". 
+        # If we want to support the new "NF_..._todos.xlsm", we should check for that too.
+        # But let's stick to the pattern logic but look in source_dir.
+        
         pattern_prefix = f"Combined_NFs_{y_str}_{m_str}"
+        # Fallback to NF_..._todos if Combined not found?
+        # Let's try to find either.
+        
         found_file = None
         
-        # Check if output_dir exists before listing
-        if os.path.exists(output_dir):
-            for f in os.listdir(output_dir):
-                if f.startswith(pattern_prefix) and f.endswith(".xlsx"):
+        if os.path.exists(source_dir):
+            for f in os.listdir(source_dir):
+                # Check for original pattern OR new pattern
+                if (f.startswith(pattern_prefix) or f.startswith(f"NF_{y_str}_{m_str}_todos")) and (f.endswith(".xlsx") or f.endswith(".xlsm")):
                     found_file = f
                     break
         
         if not found_file:
-            print(f"⚠️ Missing file for {y_str}-{m_str}: {pattern_prefix}*.xlsx in {output_dir}")
+            print(f"⚠️ Missing file for {y_str}-{m_str} in {source_dir}")
             continue
 
-        file_path = os.path.join(output_dir, found_file)
+        file_path = os.path.join(source_dir, found_file)
         try:
             df = pd.read_excel(file_path)
             df.insert(0, "RefMonth", f"{y_str}-{m_str}")

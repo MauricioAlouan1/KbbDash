@@ -197,7 +197,7 @@ def calculate_qtsp_from_invoices(base_dir: str, year: int, month: int) -> pd.Dat
         print("⚠️ Could not find Dropbox root to locate invoices.")
         return pd.DataFrame(columns=["CODPP", "Qt_S"])
 
-    nfi_path = os.path.join(dropbox_root, "nfs", "Mauricio", "Contabilidade - Tsuriel", f"NFI_{year}_{month:02d}_todos.xlsx")
+    nfi_path = os.path.join(dropbox_root, "nfs", "Mauricio", "Contabilidade", f"{year}_{month:02d}", f"NFI_{year}_{month:02d}_todos.xlsx")
     
     if not os.path.exists(nfi_path):
         print(f"⚠️ Invoice file not found: {nfi_path}")

@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 from openpyxl import load_workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 # === CONFIG ===
 YEAR = "2025"
@@ -37,8 +38,12 @@ SERIES_LIST = [
 # === MAIN FUNCTION ===
 def combine_monthly_items_excels(year, month):
     # Define output directory
-    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade - Tsuriel")
     month_num = str(month).split('-')[0].zfill(2)
+    output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade", f"{year}_{month_num}")
+    
+    if not os.path.exists(output_dir):
+        print(f"⚠️ Output directory not found: {output_dir}")
+        return
 
     # Define path for lookup tables and Resumo
     # Assuming BASE_FOLDER ends with /nfs, we strip it to get the root Dropbox folder
@@ -88,8 +93,41 @@ def combine_monthly_items_excels(year, month):
         return
 
     # Save combined file
-    combined_output = os.path.join(output_dir, f"NFI_{year}_{month_num}_todos.xlsx")
-    combined_df.to_excel(combined_output, index=False)
+    # combined_output = os.path.join(output_dir, f"NFI_{year}_{month_num}_todos.xlsx")
+    # combined_df.to_excel(combined_output, index=False)
+    
+    # Use Template
+    template_file = os.path.join(dropbox_root, "KBB MF", "AAA", "Balancetes", "Fechamentos", "data", "Template", "NFI_XML.xlsm")
+    
+    if not os.path.exists(template_file):
+        print(f"❌ Template file not found: {template_file}")
+        return
+
+    print(f"Loading template: {template_file}")
+    wb = load_workbook(template_file, keep_vba=True)
+    
+    # Target sheet
+    if "NFI" in wb.sheetnames:
+        ws = wb["NFI"]
+        # Clear existing data if any (optional, but good practice if reusing)
+        # For now, assuming template is clean or we append/overwrite. 
+        # Better to clear:
+        ws.delete_rows(2, ws.max_row)
+    else:
+        ws = wb.create_sheet("NFI")
+        
+    # Write dataframe to sheet
+    for r in dataframe_to_rows(combined_df, index=False, header=True):
+        ws.append(r)
+        
+    # Delete Sheet1 if exists
+    if "Sheet1" in wb.sheetnames:
+        del wb["Sheet1"]
+        
+    # Save as XLSM
+    combined_output = os.path.join(output_dir, f"NFI_{year}_{month_num}_todos.xlsm")
+    wb.save(combined_output)
+    
     print(f"✅ Combined file saved: {combined_output}")
     print(f"📊 Total rows combined: {len(combined_df)}")
 
