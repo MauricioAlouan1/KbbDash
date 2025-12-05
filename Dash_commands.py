@@ -24,15 +24,34 @@ commands_layout = html.Div([
         dcc.Input(id='cmd-month', type='number', value=default_month, min=1, max=12, style={'margin-right': '10px'}),
     ], style={'margin-bottom': '20px'}),
 
+    # Main Button
     html.Div([
-        html.Button("1. Create NFI (XML -> Excel)", id='btn-step1-nfi', n_clicks=0, style={'margin': '5px'}),
-        html.Button("1. Create NF (XML -> Excel)", id='btn-step1-nf', n_clicks=0, style={'margin': '5px'}),
-        html.Button("2. Aggregate NF", id='btn-step2-nf-agg', n_clicks=0, style={'margin': '5px'}),
-        html.Button("2. Aggregate NFI", id='btn-step2-nfi-agg', n_clicks=0, style={'margin': '5px'}),
-        html.Button("2.5. Process Data (Renames/Formats)", id='btn-step2-5', n_clicks=0, style={'margin': '5px'}),
-        html.Button("3. Update Entradas", id='btn-step3', n_clicks=0, style={'margin': '5px'}),
-        html.Button("4. Inventory Process", id='btn-step4', n_clicks=0, style={'margin': '5px'}),
-        html.Button("5. Generate Report (Remake Dataset)", id='btn-step5', n_clicks=0, style={'margin': '5px'}),
+        html.Button("RUN MASTER PIPELINE (ALL STEPS)", id='btn-master', n_clicks=0, 
+                    style={'font-size': '18px', 'padding': '15px', 'background-color': '#007bff', 'color': 'white', 'border': 'none', 'cursor': 'pointer', 'width': '100%', 'margin-bottom': '20px'}),
+    ]),
+
+    # Collapsible Advanced Steps
+    html.Details([
+        html.Summary("Advanced: Individual Pipeline Steps", style={'cursor': 'pointer', 'margin-bottom': '10px', 'font-weight': 'bold'}),
+        html.Div([
+            html.Button("1. Create NFI (XML -> Excel)", id='btn-step1-nfi', n_clicks=0, style={'margin': '5px'}),
+            html.Button("1. Create NF (XML -> Excel)", id='btn-step1-nf', n_clicks=0, style={'margin': '5px'}),
+            html.Button("2. Aggregate NF", id='btn-step2-nf-agg', n_clicks=0, style={'margin': '5px'}),
+            html.Button("2. Aggregate NFI", id='btn-step2-nfi-agg', n_clicks=0, style={'margin': '5px'}),
+            html.Button("2.5. Process Data (Renames/Formats)", id='btn-step2-5', n_clicks=0, style={'margin': '5px'}),
+            html.Button("3. Update Entradas", id='btn-step3', n_clicks=0, style={'margin': '5px'}),
+            html.Button("4. Inventory Process", id='btn-step4', n_clicks=0, style={'margin': '5px'}),
+            html.Button("5. Generate Report (Remake Dataset)", id='btn-step5', n_clicks=0, style={'margin': '5px'}),
+        ], style={'display': 'flex', 'flex-wrap': 'wrap', 'margin-bottom': '20px', 'padding': '10px', 'border': '1px solid #ddd'})
+    ], style={'margin-bottom': '20px'}),
+
+    # Other Scripts Section
+    html.H4("Other Scripts"),
+    html.Div([
+        html.Button("Conciliação Estoque", id='btn-conc-estoque', n_clicks=0, style={'margin': '5px', 'background-color': '#6c757d', 'color': 'white'}),
+        html.Button("Conciliação CAR Receber", id='btn-conc-car', n_clicks=0, style={'margin': '5px', 'background-color': '#6c757d', 'color': 'white'}),
+        html.Button("Compras", id='btn-compras', n_clicks=0, style={'margin': '5px', 'background-color': '#6c757d', 'color': 'white'}),
+        html.Button("Atualiza Entradas (Standalone)", id='btn-atualiza-entradas-std', n_clicks=0, style={'margin': '5px', 'background-color': '#6c757d', 'color': 'white'}),
     ], style={'display': 'flex', 'flex-wrap': 'wrap', 'margin-bottom': '20px'}),
 
     html.H4("Execution Output:"),
@@ -42,18 +61,24 @@ commands_layout = html.Div([
 # Callback
 @app.callback(
     Output('cmd-output', 'children'),
-    [Input('btn-step1-nfi', 'n_clicks'),
+    [Input('btn-master', 'n_clicks'),
+     Input('btn-step1-nfi', 'n_clicks'),
      Input('btn-step1-nf', 'n_clicks'),
      Input('btn-step2-nf-agg', 'n_clicks'),
      Input('btn-step2-nfi-agg', 'n_clicks'),
      Input('btn-step2-5', 'n_clicks'),
      Input('btn-step3', 'n_clicks'),
      Input('btn-step4', 'n_clicks'),
-     Input('btn-step5', 'n_clicks')],
+     Input('btn-step5', 'n_clicks'),
+     Input('btn-conc-estoque', 'n_clicks'),
+     Input('btn-conc-car', 'n_clicks'),
+     Input('btn-compras', 'n_clicks'),
+     Input('btn-atualiza-entradas-std', 'n_clicks')],
     [State('cmd-year', 'value'),
      State('cmd-month', 'value')]
 )
-def run_pipeline_step(btn1_nfi, btn1_nf, btn2_nf, btn2_nfi, btn2_5, btn3, btn4, btn5, year, month):
+def run_pipeline_step(btn_master, btn1_nfi, btn1_nf, btn2_nf, btn2_nfi, btn2_5, btn3, btn4, btn5, 
+                      btn_conc_estoque, btn_conc_car, btn_compras, btn_atualiza_std, year, month):
     ctx = callback_context
 
     if not ctx.triggered:
@@ -69,23 +94,32 @@ def run_pipeline_step(btn1_nfi, btn1_nf, btn2_nf, btn2_nfi, btn2_5, btn3, btn4, 
         'btn-step2-5': 'step2_5_process_data',
         'btn-step3': 'step3_update_entradas',
         'btn-step4': 'step4_inventory',
-        'btn-step5': 'step5_report'
+        'btn-step5': 'step5_report',
+        'btn-conc-estoque': 'conc_estoque',
+        'btn-conc-car': 'conc_car',
+        'btn-compras': 'compras',
+        'btn-atualiza-entradas-std': 'step3_update_entradas' # Reusing the step name as it maps to the same script
     }
-
-    step_name = step_map.get(button_id)
-    if not step_name:
-        return "Unknown button."
 
     if not year or not month:
         return "Error: Year and Month must be specified."
 
-    cmd = [
-        "python", "master_pipeline.py",
-        "--step", step_name,
-        "--year", str(year),
-        "--month", str(month),
-        "--force" # Force to skip dependency checks if user explicitly clicks? Or maybe not? Let's use force to ensure it runs if user asks.
-    ]
+    cmd = ["python", "master_pipeline.py", "--year", str(year), "--month", str(month)]
+
+    if button_id == 'btn-master':
+        # Run all steps (no --step argument)
+        # We might want to pass --force if the user wants to force run everything?
+        # For now, let's just run standard pipeline which checks dependencies.
+        # User can use force if they want, but we don't have a checkbox for it yet.
+        # Let's assume standard run.
+        pass 
+    else:
+        step_name = step_map.get(button_id)
+        if not step_name:
+            return "Unknown button."
+        
+        cmd.extend(["--step", step_name])
+        cmd.append("--force") # Force individual steps as per previous behavior
 
     try:
         result = subprocess.run(

@@ -9,7 +9,25 @@ from Dash_commands import commands_layout
 from Dash_shared import app, load_data
 
 df_init = load_data()
-def _default_filters_from_df(df: pd.DataFrame):
+
+def _default_filters_from_df(data):
+    # If data is a dict, try to pick a relevant sheet
+    df = None
+    if isinstance(data, dict):
+        # Prioritize sheets that likely have the relevant columns (DATE, EMPRESA, MP)
+        for key in ["MLK_Vendas", "O_NFCI", "Kon_RelGeral", "L_LPI"]:
+            if key in data and not data[key].empty:
+                df = data[key]
+                break
+        # Fallback to first non-empty sheet
+        if df is None:
+            for key, val in data.items():
+                if not val.empty:
+                    df = val
+                    break
+    else:
+        df = data
+
     # Safe fallbacks
     default = {
         "start": pd.Timestamp.today().normalize() - MonthEnd(1) + pd.offsets.MonthBegin(0),

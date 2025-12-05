@@ -5,7 +5,25 @@ import pandas as pd
 import plotly.graph_objs as go
 
 # One-time load (you can refresh in the callback if your data changes frequently)
-df_raw = load_data()  # expected columns: DATE, EMPRESA, MP, VV_tot, Mrg_tot (adjust if your names differ)
+# One-time load (you can refresh in the callback if your data changes frequently)
+data_raw = load_data()
+
+# Extract the DataFrame we need (Conc_Estoq usually has VV_tot, Mrg_tot)
+df_raw = None
+if isinstance(data_raw, dict):
+    # Try specific keys
+    for key in ["Conc_Estoq - Conc", "Conc_Estoq - Child", "Conc_Estoq"]:
+        if key in data_raw:
+            df_raw = data_raw[key]
+            break
+    # Fallback: look for any sheet with VV_tot
+    if df_raw is None:
+        for key, df in data_raw.items():
+            if "VV_tot" in df.columns:
+                df_raw = df
+                break
+else:
+    df_raw = data_raw
 
 salesmargin_layout = html.Div(
     [

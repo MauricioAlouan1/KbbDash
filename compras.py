@@ -3,21 +3,48 @@ import pandas as pd
 from pathlib import Path
 
 # ⚙️ Configurações
-ANO = 2025
-MES = 11
+import argparse
+import sys
+from datetime import datetime
+
+# ⚙️ Configurações via argumentos
+parser = argparse.ArgumentParser(description="Relatório de Compras")
+parser.add_argument("--year", "-y", type=int, help="Ano (ex: 2025)")
+parser.add_argument("--month", "-m", type=int, help="Mês (1-12)")
+args = parser.parse_args()
+
+if args.year is None or args.month is None:
+    now = datetime.now()
+    print("Ano e/ou mês não especificado.")
+    # Default to current year/month if running interactively, or raise error?
+    # For pipeline consistency, let's default to previous month if not provided, similar to others
+    # But better to ask if interactive, or default.
+    # Let's use the same pattern as other scripts if possible, or just default.
+    ANO = args.year if args.year else 2025 # Fallback
+    MES = args.month if args.month else 11 # Fallback
+    # Better:
+    # ANO = int(input(f"Enter year (default {now.year}): ") or now.year)
+    # MES = int(input(f"Enter month [1-12] (default {now.month -1}): ") or (now.month -1))
+else:
+    ANO = args.year
+    MES = args.month
+
 COBERTURA_MINIMA = 30
 
 # 📂 Caminhos possíveis
 paths_to_try = [
     Path(f"/Users/simon/Library/CloudStorage/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/clean/{ANO}_{MES:02}"),
-    Path(f"/home/simon/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/clean/{ANO}_{MES:02}")
+    Path(f"/home/simon/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/clean/{ANO}_{MES:02}"),
+    Path(f"/Users/mauricioalouan/Dropbox/KBB MF/AAA/Balancetes/Fechamentos/data/clean/{ANO}_{MES:02}")
 ]
 base_path = next((p for p in paths_to_try if p.exists()), None)
 if not base_path:
-    raise FileNotFoundError("❌ Nenhum dos caminhos encontrados.")
+    print(f"❌ Nenhum dos caminhos encontrados para {ANO}_{MES:02}")
+    sys.exit(1)
+
 
 # 📄 Arquivos
-arquivo_resumo = base_path / f"R_ResumoU6M_{ANO}_{MES:02}.xlsm"
+arquivo_resumo = base_path / f"R_Resumo_{ANO}_{MES:02}.xlsx"
 arquivo_estoque = base_path / f"R_Estoq_fdm_{ANO}_{MES:02}.xlsx"
 
 # 📊 Leitura dos dados

@@ -14,7 +14,10 @@ SCRIPTS = {
     "step2_5_process_data": "process_data",
     "step3_update_entradas": "Atualiza_Entradas",
     "step4_inventory": "process_inv",
-    "step5_report": "remake_dataset01"
+    "step5_report": "remake_dataset01",
+    "conc_estoque": "Conc_Estoque",
+    "conc_car": "Conc_CARReceber_v2",
+    "compras": "compras"
 }
 
 def load_module(script_name):

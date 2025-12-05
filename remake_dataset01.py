@@ -2492,7 +2492,7 @@ def main(year: int, month: int):
     }
 
     # Prepare output file
-    output_file = os.path.join(base_dir, "clean", ano_mes, f"Kon_Report_{ano_mes}.xlsx")
+    output_file = os.path.join(base_dir, "clean", ano_mes, f"R_Resumo_{ano_mes}.xlsx")
     wb_template = Workbook()
     
     # --- Write each dataframe except excluded ones ---
