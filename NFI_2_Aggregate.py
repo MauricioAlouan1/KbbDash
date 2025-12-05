@@ -2,10 +2,8 @@ import os
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
+import xlwings as xw
 
-# === CONFIG ===
-YEAR = "2025"
-MONTH = "11-Novembro"
 
 # Define base folder and available series
 path_options = [
@@ -17,10 +15,6 @@ for path in path_options:
     if os.path.exists(path):
         BASE_FOLDER = path
         break
-
-if not BASE_FOLDER:
-    print("⚠️ Warning: No valid BASE_FOLDER found.")
-    BASE_FOLDER = "/Users/mauricioalouan/Dropbox/nfs"
 
 # The same series used in NFI_1_Create.py
 SERIES_LIST = [
@@ -35,11 +29,23 @@ SERIES_LIST = [
     "Serie 9 - Shopee Full"
 ]
 
+import xlwings as xw
+
+def run_macro(path, macro_name):
+    app = xw.App(visible=False)
+    wb = app.books.open(path)
+    app.macro(macro_name)()
+    wb.app.api.calculate()
+    wb.save()
+    wb.close()
+    app.quit()
+
 # === MAIN FUNCTION ===
 def combine_monthly_items_excels(year, month):
     # Define output directory
     month_num = str(month).split('-')[0].zfill(2)
     output_dir = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade", f"{year}_{month_num}")
+    OUTPUT_DIR = output_dir
     
     if not os.path.exists(output_dir):
         print(f"⚠️ Output directory not found: {output_dir}")
@@ -52,6 +58,7 @@ def combine_monthly_items_excels(year, month):
     
     lookup_file = os.path.join(tables_dir, "T_NFTipo.xlsx")
     resumo_file = os.path.join(tables_dir, "R_ResumoFin25.xlsx")
+    prodf_file = os.path.join(tables_dir, "T_Prodf.xlsx")
 
     # Load Lookup Table
     try:
@@ -67,6 +74,10 @@ def combine_monthly_items_excels(year, month):
         print(f"⚠️ Error reading lookup table: {e}")
         lookup_map = {}
 
+    # Load Product Table
+    prodf_df = pd.DataFrame()
+    prodf_raw = pd.read_excel(prodf_file)
+    prodf_df = prodf_raw[["CodPF", "CodPP"]].drop_duplicates(subset=["CodPF"])
     combined_df = pd.DataFrame()
 
     # Iterate through series
@@ -91,6 +102,12 @@ def combine_monthly_items_excels(year, month):
     if combined_df.empty:
         print("No data combined.")
         return
+
+    # Merge with T_Prodf
+    
+    print("Merging with T_Prodf...")
+    combined_df = combined_df.merge(prodf_df, left_on="CProd", right_on="CodPF", how="left")
+    combined_df["CodPP"] = combined_df["CodPP"].fillna("xxx")
 
     # Save combined file
     # combined_output = os.path.join(output_dir, f"NFI_{year}_{month_num}_todos.xlsx")
@@ -119,6 +136,10 @@ def combine_monthly_items_excels(year, month):
     # Write dataframe to sheet
     for r in dataframe_to_rows(combined_df, index=False, header=True):
         ws.append(r)
+    
+    # Add Autofilter
+    if ws.max_row > 0:
+        ws.auto_filter.ref = ws.dimensions
         
     # Delete Sheet1 if exists
     if "Sheet1" in wb.sheetnames:
@@ -205,11 +226,36 @@ def combine_monthly_items_excels(year, month):
     except Exception as e:
         print(f"❌ Error updating Resumo: {e}")
 
+
+
+def run_macro(path, macro_name):
+    app = xw.App(visible=False)
+    try:
+        wb = app.books.open(path)
+        app.macro(macro_name)()
+        wb.save()
+        wb.close()
+    except Exception as e:
+        print(f"❌ Error running macro {macro_name}: {e}")
+    finally:
+        app.quit()
+
 # === RUN ===
 def main(year, month):
     year_str = str(year)
     month_str = f"{month:02d}"
+
     combine_monthly_items_excels(year_str, month_str)
+    
+    # Path to the XLSM file
+    file_path = os.path.join(BASE_FOLDER, "Mauricio", "Contabilidade", f"{year_str}_{month_str}", f"NFI_{year_str}_{month_str}_todos.xlsm")
+    
+    if os.path.exists(file_path):
+        print(f"Running macro on: {file_path}")
+        run_macro(file_path, "Pivot_NFI_XML")
+    else:
+        print(f"❌ File not found for macro execution: {file_path}")
+
 
 if __name__ == "__main__":
     import argparse

@@ -260,6 +260,16 @@ cols_todrop = {
 audit_client_names = ['ALWE', 'COMPROU CHEGOU', 'NEXT COMPRA']  # Add other clients as needed
 invaudit_client_names = ['ALWE', 'COMPROU CHEGOU', 'NEXT COMPRA']  # Add other clients as needed
 
+import xlwings as xw
+
+def run_macro(path, macro_name):
+    app = xw.App(visible=False)
+    wb = app.books.open(path)
+    app.macro(macro_name)()
+    wb.save()
+    wb.close()
+    app.quit()
+
 def debug_df(all_data, table_name, label):
     if table_name not in all_data or all_data[table_name].empty:
         print(f"⚠️ [{label}] Tabela '{table_name}' não encontrada ou vazia.")
@@ -2528,6 +2538,7 @@ def main(year: int, month: int):
         #excel_format(output_file, column_format_dict)
         #excel_autofilters(output_file)
         print(f"✅ Skipped Formatting and autofilters")
+        run_macro(output_file, "RunAllMacros")
     except NameError:
         pass
 

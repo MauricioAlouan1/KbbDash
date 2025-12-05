@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 from openpyxl import load_workbook
+import xlwings as xw
 
 # ─────────────────────────────────────────────────────────────
 # 1. Prompt Logic
@@ -104,6 +105,13 @@ def apply_prev_month_values(df: pd.DataFrame, base_dir: str, year: int, month: i
 
     return df
 
+def force_excel_recalc(path):
+    app = xw.App(visible=False)
+    wb = app.books.open(path)
+    wb.app.api.calculate()
+    wb.save()
+    wb.close()
+    app.quit()
 
 # ─────────────────────────────────────────────────────────────
 # 3. Excel Writing (with formatting preserved)
@@ -322,6 +330,9 @@ def main(year=None, month=None):
     print(f"✅ Wrote {written_qtsp} Qt_S values for AnoMes {ano_mes}")
 
     print(f"💾 Saved to: {out_path}")
+    force_excel_recalc(out_path)
+    print(f"✅ Recalculated workbook: {out_path}")
+    
 # ─────────────────────────────────────────────────────────────
 # Entry Point
 # ─────────────────────────────────────────────────────────────
