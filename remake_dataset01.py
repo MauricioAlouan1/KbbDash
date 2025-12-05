@@ -2491,9 +2491,19 @@ def main(year: int, month: int):
         "MGK_Extrato", "MLA_Vendas" 
     }
 
-    # Prepare    # Output file
+    # Prepare output file
     output_file = os.path.join(base_dir, "clean", ano_mes, f"R_Resumo_{ano_mes}.xlsm")
-    wb_template = Workbook()
+    
+    # Check for template in Template folder
+    template_path = os.path.join(base_dir, "Template", "PivotTemplate.xlsm")
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"❌ Template not found at {template_path}. Please ensure 'PivotTemplate.xlsm' exists in the Template folder.")
+
+    try:
+        wb_template = load_workbook(template_path, keep_vba=True)
+        print(f"✅ Loaded template from {template_path}")
+    except Exception as e:
+        raise RuntimeError(f"❌ Could not load template: {e}")
     
     # --- Write each dataframe except excluded ones ---
     for key, df in all_data.items():
