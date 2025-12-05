@@ -5,6 +5,7 @@ from pandas.tseries.offsets import MonthEnd
 from Dash_overview import overview_layout
 from Dash_sheetview import sheetview_layout
 from Dash_salesmargin import salesmargin_layout
+from Dash_commands import commands_layout
 from Dash_shared import app, load_data
 
 df_init = load_data()
@@ -76,7 +77,8 @@ app.layout = html.Div([
     dcc.Tabs(id="tabs", value='overview', children=[
         dcc.Tab(label='Overview', value='overview'),
         dcc.Tab(label='Sheet View', value='sheetview'),
-        dcc.Tab(label='Sales & Margin', value='salesmargin')
+        dcc.Tab(label='Sales & Margin', value='salesmargin'),
+        dcc.Tab(label='Commands', value='commands')
     ]),
     html.Div(
         style={'display': 'flex', 'justify-content': 'space-between', 'padding': '10px 0'},
@@ -112,6 +114,8 @@ def render_content(tab):
         ])
     elif tab == 'salesmargin':
         return salesmargin_layout
+    elif tab == 'commands':
+        return commands_layout
     return overview_layout
 
 # Callback to update sheet content
